@@ -128,6 +128,22 @@
             (n:ascii->bytes "Cryptographic Forum Research Group"))
            "a8061dc1305136c6c22b8baf0c0127a9")
 
+    ;; constant-time (limb) Poly1305 vs big-integer reference, varied lengths
+    (incf *count*)
+    (let ((st 424242) (ok t))
+      (flet ((rb (nn) (let ((v (make-array nn :element-type '(unsigned-byte 8))))
+                        (dotimes (i nn v)
+                          (setf st (logand #xffffffff (logxor st (ash st 13))))
+                          (setf st (logand #xffffffff (logxor st (ash st -17))))
+                          (setf st (logand #xffffffff (logxor st (ash st 5))))
+                          (setf (aref v i) (logand st #xff))))))
+        (dotimes (i 300)
+          (let ((key (rb 32)) (msg (rb i)))          ; lengths 0..299, incl. partial blocks
+            (unless (n:bytes= (n:poly1305-mac key msg) (natrium::poly1305-mac-reference key msg))
+              (setf ok nil)))))
+      (if ok (format t "  ok    poly1305 constant-time == reference (300 lengths)~%")
+          (progn (incf *fails*) (format t "  FAIL  poly1305 ct vs reference~%"))))
+
     ;; ---- ChaCha20-Poly1305 AEAD (RFC 8439 2.8.2) ----
     (let ((key (hex->bytes "808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9f"))
           (nonce (hex->bytes "070000004041424344454647"))

@@ -77,14 +77,34 @@ hardware entropy source, and everything above it (the HMAC-DRBG behind
 `random-bytes`) is pure, portable computation.
 
 **The NaCl primitive set is complete** — hashing, AEAD, key agreement, and
-signatures, all vector-gated. What remains is not new primitives but hardening:
+signatures, all vector-gated.
 
-**Roadmap:** the per-arch constant-time limb backend — a radix-2⁵¹ Curve25519
-field and a 26-bit-limb Poly1305, expressed over a small set of compiler
-intrinsics (widening multiply, add-with-carry) with pure-Lisp fallbacks, slotted
-behind the current references (which stay as the differential oracle). Today's
-field/scalar arithmetic is variable-time; that backend is what makes the
-secret-key paths (Ed25519 signing, X25519, Poly1305) side-channel-hardened.
+### Constant-time
+
+Every secret-key path is implemented in a constant-time discipline:
+
+- **`fe25519`** — GF(2²⁵⁵−19) in radix-2⁵¹ limbs; add/sub/mul/sq/invert/cmov
+  with a fixed operation sequence and no data-dependent branch, index, or count.
+- **X25519** — the Montgomery ladder over `fe25519`, fixed 255 iterations,
+  branch-free `cswap`.
+- **Ed25519** — point arithmetic over `fe25519`; scalar multiplication is
+  double-and-add-*always* with a branch-free point `cmov`; scalar reduction
+  mod L is Barrett with fixed-size operands.
+- **Poly1305** — 26-bit-limb accumulator, fixed 5×5-limb multiply per block.
+
+These are the *public* entry points; the original big-integer implementations
+are kept in-tree as `*-reference` and are the **differential oracle** — the
+constant-time code is checked against them on tens of thousands of random inputs
+(and both pass the RFC/NIST vectors).
+
+The discipline is *structural* constant-time: fixed control and data flow. The
+portable limb multiply is still CL `*`; the one remaining step is a per-arch
+backend that lowers the limb multiply to a widening-multiply / add-with-carry
+intrinsic (with the pure-Lisp fallback these references provide), closing the
+last instruction-level gap on hardware that has data-dependent multiply timing.
+
+**Roadmap:** that intrinsic backend, and the pure-CL SSH/git transport this
+suite was built to unblock.
 
 ## Running the tests
 
