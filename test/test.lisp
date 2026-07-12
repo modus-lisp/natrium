@@ -175,6 +175,21 @@
       (check "x25519 bob public (rfc7748 6.1)"   (n:x25519-base bsk) bpk)
       (check "x25519 shared A*bpk (rfc7748 6.1)" (n:x25519 ask (hex->bytes bpk)) shared)
       (check "x25519 shared B*apk (rfc7748 6.1)" (n:x25519 bsk (hex->bytes apk)) shared))
+    ;; constant-time ladder vs big-integer reference on random inputs
+    (incf *count*)
+    (let ((st 2463534242) (ok t))
+      (flet ((rb () (let ((v (make-array 32 :element-type '(unsigned-byte 8))))
+                      (dotimes (i 32 v)
+                        (setf st (logand #xffffffff (logxor st (ash st 13))))
+                        (setf st (logand #xffffffff (logxor st (ash st -17))))
+                        (setf st (logand #xffffffff (logxor st (ash st 5))))
+                        (setf (aref v i) (logand st #xff))))))
+        (dotimes (i 200)
+          (let ((s (rb)) (u (rb)))
+            (unless (n:bytes= (n:x25519 s u) (natrium::x25519-reference s u))
+              (setf ok nil)))))
+      (if ok (format t "  ok    x25519 constant-time == reference (200 random)~%")
+          (progn (incf *fails*) (format t "  FAIL  x25519 ct vs reference~%"))))
 
     ;; ---- Ed25519 (RFC 8032 7.1) ----
     (dolist (tv (list

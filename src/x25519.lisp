@@ -27,10 +27,9 @@
   "Multiplicative inverse of Z mod p = Z^(p-2)."
   (fe-pow z (- *p25519* 2)))
 
-(defun x25519 (scalar u-bytes)
-  "X25519(SCALAR, U): the Montgomery ladder (RFC 7748 5).  SCALAR and U-BYTES are
-   32-byte little-endian vectors; returns the 32-byte little-endian u-coordinate
-   of SCALAR*U.  SCALAR is clamped and U's high bit masked per the spec."
+(defun x25519-reference (scalar u-bytes)
+  "Big-integer reference X25519 (RFC 7748 5): the differential oracle for the
+   constant-time fe25519 ladder (x25519-ct.lisp).  Variable-time; not for keys."
   (declare (type u8v scalar u-bytes))
   (let* ((p *p25519*)
          (k (let ((c (copy-seq scalar)))            ; clamp (does not mutate input)
@@ -64,14 +63,3 @@
       (cswap swap x2 x3)
       (cswap swap z2 z3)
       (uint->le (f* x2 (fe-inv z2)) 32))))
-
-(defun x25519-base (scalar)
-  "SCALAR * basepoint (u = 9): the public key / DH share of a private SCALAR."
-  (let ((nine (make-u8v 32)))
-    (setf (aref nine 0) 9)
-    (x25519 scalar nine)))
-
-(defun x25519-keypair ()
-  "Fresh X25519 keypair from the CSPRNG.  Returns (values PRIVATE-32 PUBLIC-32)."
-  (let ((sk (random-bytes 32)))
-    (values sk (x25519-base sk))))

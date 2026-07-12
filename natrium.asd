@@ -28,6 +28,8 @@
                  (:file "poly1305")
                  (:file "aead")
                  (:file "x25519")
+                 (:file "fe25519")
+                 (:file "x25519-ct")
                  (:file "ed25519"))))
   :in-order-to ((test-op (test-op "natrium/test"))))
 
