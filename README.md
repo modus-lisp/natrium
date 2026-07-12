@@ -1,0 +1,72 @@
+# natrium
+
+**A dependency-free, portable Common Lisp crypto suite.** No FFI, no external
+libraries — its own hashing, its own arithmetic. `natrium` implements the modern
+constant-time primitive set (the [NaCl](https://nacl.cr.yp.to/) / libsodium
+family): SHA-2 + HMAC, ChaCha20-Poly1305, X25519, Ed25519.
+
+The name is the Latin for sodium — the *Na* in NaCl. The suite is chosen on
+purpose: these primitives are **safe to implement without secret-dependent
+tables or branches**, which is exactly what a hand-written, auditable
+implementation needs. (AES-GCM, RSA, and the NIST P-curves — the
+timing-footgun primitives — are deliberately *not* here.)
+
+## Why it exists
+
+It's the crypto floor for a **non-SBCL, multi-architecture Lisp OS**
+([`modus`](https://github.com/modus-lisp)), where the usual answer (ironclad)
+is a poor fit: ironclad's speed comes from SBCL VOPs that don't port, so on a
+different compiler it runs as a slow portable fallback anyway. If we're going to
+run portable, we'd rather run *our own* code — self-contained, readable, and
+written in a constant-time discipline from the start.
+
+The design mirrors [`secp256k1-fast`](https://github.com/ynniv): a **portable
+reference is the default and the differential oracle**, and any per-architecture
+fast path (widening multiply / add-with-carry, expressed as a small set of
+compiler intrinsics, *not* whole-operation assembly) slots in behind it and is
+checked against the reference. Correctness is arch-independent; speed lands
+incrementally, per arch, without touching the crypto above it.
+
+## Design principles
+
+- **Self-contained.** Zero dependencies. `:depends-on ()`.
+- **Constant-time for secret keys.** Secret-key paths use fixed-width limbs and
+  no data-dependent branches or table indexing. Public-data paths (e.g.
+  signature *verification*) may relax this.
+- **Reference-as-oracle.** The portable definition is the source of truth; a
+  native backend must match it byte-for-byte.
+- **Vectors are the gate.** Every primitive is checked against its published
+  test vectors (FIPS 180-4, RFC 4231/7748/8032/8439) plus Wycheproof edge cases
+  before it ships.
+
+## Status
+
+**Phase 0 — the hashing floor (done):**
+
+| primitive | vectors |
+|---|---|
+| SHA-256 | FIPS 180-4 |
+| SHA-512 | FIPS 180-4 |
+| HMAC-SHA256 | RFC 4231 |
+| HMAC-SHA512 | RFC 4231 |
+
+```lisp
+(natrium:sha256 (natrium:ascii->bytes "abc"))          ; => 32-byte digest
+(natrium:sha512 msg-bytes)                              ; => 64-byte digest
+(natrium:hmac-sha256 key-bytes msg-bytes)              ; => 32-byte tag
+(natrium:hmac-sha512 key-bytes msg-bytes)              ; => 64-byte tag
+(natrium:bytes= tag-a tag-b)                            ; constant-time compare
+```
+
+**Roadmap:** entropy/CSPRNG contract (the one OS-coupled piece) → ChaCha20 →
+Poly1305 → ChaCha20-Poly1305 AEAD → the Curve25519 field → X25519 → Ed25519 →
+the per-arch intrinsic backend.
+
+## Running the tests
+
+```sh
+./run-tests.sh          # or: sbcl ... (asdf:test-system "natrium")
+```
+
+MIT. Research / educational; **not audited** — do not protect real keys with
+this without an independent side-channel review.

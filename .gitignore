@@ -1,0 +1,5 @@
+*.fasl
+*.fasl-tmp
+*~
+.#*
+/build/
