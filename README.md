@@ -51,6 +51,7 @@ incrementally, per arch, without touching the crypto above it.
 | ChaCha20 | RFC 8439 (block KAT + encryption) |
 | Poly1305 | RFC 8439 |
 | ChaCha20-Poly1305 AEAD | RFC 8439 (+ round-trip + tamper-reject) |
+| X25519 | RFC 7748 (§5.2 incl. 1000×, §6.1 DH) |
 
 ```lisp
 (natrium:sha256 (natrium:ascii->bytes "abc"))   ; => 32-byte digest
@@ -62,6 +63,8 @@ incrementally, per arch, without touching the crypto above it.
 (natrium:chacha20 key nonce data :counter 1)     ; RFC 8439 stream XOR
 (natrium:chacha20-poly1305-encrypt key nonce pt aad)  ; => (values ciphertext tag)
 (natrium:chacha20-poly1305-decrypt key nonce ct tag aad)  ; => plaintext, or NIL if forged
+(natrium:x25519-keypair)                         ; => (values private public)
+(natrium:x25519 my-private their-public)         ; => 32-byte shared secret
 ```
 
 `*os-entropy*` is the sole OS-coupled seam — a one-argument function returning
@@ -69,8 +72,9 @@ raw entropy bytes. The default reads `/dev/urandom`; **modus rebinds it** to its
 hardware entropy source, and everything above it (the HMAC-DRBG behind
 `random-bytes`) is pure, portable computation.
 
-**Roadmap:** the Curve25519 field (radix-2⁵¹) → X25519 → Ed25519 → the per-arch
-intrinsic backend. The symmetric side is complete.
+**Roadmap:** Ed25519 (RFC 8032) → the per-arch constant-time limb backend
+(radix-2⁵¹ field, intrinsics behind the reference). Symmetric side + X25519 key
+agreement are complete; signatures are next.
 
 ## Running the tests
 

@@ -22,5 +22,7 @@
    #:chacha20 #:chacha20-block
    #:poly1305-mac #:poly1305-key-gen
    #:chacha20-poly1305-encrypt #:chacha20-poly1305-decrypt
+   ;; X25519 key agreement
+   #:x25519 #:x25519-base #:x25519-keypair
    ;; small helpers
    #:ascii->bytes #:make-u8v #:u8cat #:bytes= #:u8v))

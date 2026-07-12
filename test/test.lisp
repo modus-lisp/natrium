@@ -33,6 +33,16 @@
           (t (incf *fails*)
              (format t "  FAIL  ~a~%        got  ~a~%        want ~a~%" name got-hex want-hex)))))
 
+(defun rfc7748-iterate (n)
+  "RFC 7748 5.2 iterated test: k=u=basepoint(9); repeat (k,u)=(x25519(k,u),k)
+   N times; return the final k as a byte vector."
+  (let ((k (make-array 32 :element-type '(unsigned-byte 8) :initial-element 0))
+        (u (make-array 32 :element-type '(unsigned-byte 8) :initial-element 0)))
+    (setf (aref k 0) 9 (aref u 0) 9)
+    (dotimes (i n k)
+      (let ((newk (n:x25519 k u)))
+        (setf u k k newk)))))
+
 (defun run-all ()
   (let ((*fails* 0) (*count* 0))
     (format t "~&natrium test vectors~%")
@@ -141,6 +151,30 @@
           (if (null (n:chacha20-poly1305-decrypt key nonce bad tag aad))
               (format t "  ok    aead rejects tampered ciphertext~%")
               (progn (incf *fails*) (format t "  FAIL  aead accepted tampered ciphertext~%"))))))
+
+    ;; ---- X25519 (RFC 7748) ----
+    (check "x25519 vector 1 (rfc7748 5.2)"
+           (n:x25519 (hex->bytes "a546e36bf0527c9d3b16154b82465edd62144c0ac1fc5a18506a2244ba449ac4")
+                     (hex->bytes "e6db6867583030db3594c1a424b15f7c726624ec26b3353b10a903a6d0ab1c4c"))
+           "c3da55379de9c6908e94ea4df28d084f32eccf03491c71f754b4075577a28552")
+    (check "x25519 vector 2 (rfc7748 5.2)"
+           (n:x25519 (hex->bytes "4b66e9d4d1b4673c5ad22691957d6af5c11b6421e0ea01d42ca4169e7918ba0d")
+                     (hex->bytes "e5210f12786811d3f4b7959d0538ae2c31dbe7106fc03c3efc4cd549c715a493"))
+           "95cbde9476e8907d7aade45cb4b873f88b595a68799fa152e6f8f7647aac7957")
+    (check "x25519 iterate x1 (rfc7748 5.2)" (rfc7748-iterate 1)
+           "422c8e7a6227d7bca1350b3e2bb7279f7897b87bb6854b783c60e80311ae3079")
+    (check "x25519 iterate x1000 (rfc7748 5.2)" (rfc7748-iterate 1000)
+           "684cf59ba83309552800ef566f2f4d3c1c3887c49360e3875f2eb94d99532c51")
+    ;; DH agreement (RFC 7748 6.1)
+    (let ((ask (hex->bytes "77076d0a7318a57d3c16c17251b26645df4c2f87ebc0992ab177fba51db92c2a"))
+          (apk "8520f0098930a754748b7ddcb43ef75a0dbf3a0d26381af4eba4a98eaa9b4e6a")
+          (bsk (hex->bytes "5dab087e624a8a4b79e17f8b83800ee66f3bb1292618b6fd1c2f8b27ff88e0eb"))
+          (bpk "de9edb7d7b7dc1b4d35b61c2ece435373f8343c85b78674dadfc7e146f882b4f")
+          (shared "4a5d9d5ba4ce2de1728e3bf480350f25e07e21c947d19e3376f09b3c1e161742"))
+      (check "x25519 alice public (rfc7748 6.1)" (n:x25519-base ask) apk)
+      (check "x25519 bob public (rfc7748 6.1)"   (n:x25519-base bsk) bpk)
+      (check "x25519 shared A*bpk (rfc7748 6.1)" (n:x25519 ask (hex->bytes bpk)) shared)
+      (check "x25519 shared B*apk (rfc7748 6.1)" (n:x25519 bsk (hex->bytes apk)) shared))
 
     ;; ---- random-bytes smoke (exercises the OS-entropy → DRBG path) ----
     (incf *count*)
