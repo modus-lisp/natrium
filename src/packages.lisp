@@ -15,5 +15,10 @@
    ;; hashing
    #:sha256 #:sha512
    #:hmac #:hmac-sha256 #:hmac-sha512
+   ;; entropy + CSPRNG
+   #:*os-entropy* #:os-entropy #:random-bytes
+   #:drbg-instantiate #:drbg-generate #:drbg-reseed
+   ;; stream cipher
+   #:chacha20 #:chacha20-block
    ;; small helpers
-   #:ascii->bytes #:make-u8v #:bytes= #:u8v))
+   #:ascii->bytes #:make-u8v #:u8cat #:bytes= #:u8v))

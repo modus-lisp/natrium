@@ -79,6 +79,45 @@
                           (rep-byte #xcd 50))
            "b0ba465637458c6990e5a8c5f61d4af7e576d97ff94b872de76f8050361ee3dba91ca5c11aa25eb4d679275cc5788063a5f19741120c4f2de2adebeb10a298dd")
 
+    ;; ---- ChaCha20 (RFC 8439) ----
+    (let ((key (hex->bytes "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f")))
+      (check "chacha20 block KAT (rfc8439 2.3.2)"
+             (n:chacha20-block key 1 (hex->bytes "000000090000004a00000000"))
+             "10f1e7e4d13b5915500fdd1fa32071c4c7d1f4c733c068030422aa9ac3d46c4ed2826446079faa0914c2d705d98b02a2b5129cd1de164eb9cbd083e8a2503c4e")
+      (check "chacha20 encrypt sunscreen (rfc8439 2.4.2)"
+             (n:chacha20 key (hex->bytes "000000000000004a00000000")
+                         (n:ascii->bytes
+                          "Ladies and Gentlemen of the class of '99: If I could offer you only one tip for the future, sunscreen would be it.")
+                         :counter 1)
+             "6e2e359a2568f98041ba0728dd0d6981e97e7aec1d4360c20a27afccfd9fae0bf91b65c5524733ab8f593dabcd62b3571639d624e65152ab8f530c359f0861d807ca0dbf500d6a6156a38e088a22b65e52bc514d16ccf806818ce91ab77937365af90bbf74a35be6b40b8eedf2785e42874d"))
+
+    ;; ---- HMAC-DRBG (SP 800-90A) ----
+    ;; Real NIST CAVP known-answer: HMAC_DRBG SHA-256, no reseed, no PR, Count 0
+    ;; (instantiate, generate 128 bytes and discard, generate 128 = ReturnedBits).
+    (let ((d (n:drbg-instantiate
+              (hex->bytes "ca851911349384bffe89de1cbdc46e6831e44d34a4fb935ee285dd14b71a7488")
+              (hex->bytes "659ba96c601dc69fc902940805ec0ca8")
+              :hmac #'n:hmac-sha256 :outlen 32)))
+      (n:drbg-generate d 128)
+      (check "hmac-drbg sha256 NIST CAVP count0"
+             (n:drbg-generate d 128)
+             "e528e9abf2dece54d47c7e75e5fe302149f817ea9fb4bee6f4199697d04d5b89d54fbb978a15b5c443c9ec21036d2460b6f73ebad0dc2aba6e624abf07745bc107694bb7547bb0995f70de25d6b29e2d3011bb19d27676c07162c8b5ccde0668961df86803482cb37ed6d5c0bb8d50cf1f50d476aa0458bdaba806f48be9dcb8"))
+    ;; SHA-512 DRBG (natrium's default hash), cross-checked against an independent
+    ;; SP 800-90A reference implementation (test/oracle.py).
+    (let ((d (n:drbg-instantiate
+              (hex->bytes "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f")
+              (hex->bytes "202122232425262728292a2b2c2d2e2f"))))
+      (check "hmac-drbg sha512 vector"
+             (n:drbg-generate d 64)
+             "5a947e2ec811344b506f321e3f1fbde3fde96845301a7c1793e72b2071e1d984846eda8ee0e97301da2e6d07c4937b7a50c729a1ad16e594ab3dd96561709270"))
+
+    ;; ---- random-bytes smoke (exercises the OS-entropy → DRBG path) ----
+    (incf *count*)
+    (let ((a (n:random-bytes 40)) (b (n:random-bytes 40)))
+      (if (and (= 40 (length a)) (= 40 (length b)) (not (n:bytes= a b)))
+          (format t "  ok    random-bytes length + distinctness~%")
+          (progn (incf *fails*) (format t "  FAIL  random-bytes~%"))))
+
     ;; ---- constant-time compare ----
     (incf *count*)
     (if (and (n:bytes= (n:sha256 (n:ascii->bytes "abc")) (n:sha256 (n:ascii->bytes "abc")))

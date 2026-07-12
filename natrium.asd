@@ -21,7 +21,10 @@
                  (:file "util")
                  (:file "sha256")
                  (:file "sha512")
-                 (:file "hmac"))))
+                 (:file "hmac")
+                 (:file "entropy")
+                 (:file "drbg")
+                 (:file "chacha20"))))
   :in-order-to ((test-op (test-op "natrium/test"))))
 
 (defsystem "natrium/test"

@@ -41,26 +41,32 @@ incrementally, per arch, without touching the crypto above it.
 
 ## Status
 
-**Phase 0 — the hashing floor (done):**
+**Done, each gated on published vectors:**
 
 | primitive | vectors |
 |---|---|
-| SHA-256 | FIPS 180-4 |
-| SHA-512 | FIPS 180-4 |
-| HMAC-SHA256 | RFC 4231 |
-| HMAC-SHA512 | RFC 4231 |
+| SHA-256, SHA-512 | FIPS 180-4 |
+| HMAC-SHA256, HMAC-SHA512 | RFC 4231 |
+| HMAC-DRBG (CSPRNG) | NIST SP 800-90A / CAVP known-answer |
+| ChaCha20 | RFC 8439 (block KAT + encryption) |
 
 ```lisp
-(natrium:sha256 (natrium:ascii->bytes "abc"))          ; => 32-byte digest
-(natrium:sha512 msg-bytes)                              ; => 64-byte digest
-(natrium:hmac-sha256 key-bytes msg-bytes)              ; => 32-byte tag
-(natrium:hmac-sha512 key-bytes msg-bytes)              ; => 64-byte tag
-(natrium:bytes= tag-a tag-b)                            ; constant-time compare
+(natrium:sha256 (natrium:ascii->bytes "abc"))   ; => 32-byte digest
+(natrium:sha512 msg-bytes)                       ; => 64-byte digest
+(natrium:hmac-sha256 key-bytes msg-bytes)        ; => 32-byte tag
+(natrium:bytes= tag-a tag-b)                     ; constant-time compare
+
+(natrium:random-bytes 32)                        ; CSPRNG (HMAC-DRBG over *os-entropy*)
+(natrium:chacha20 key nonce data :counter 1)     ; RFC 8439 stream XOR
 ```
 
-**Roadmap:** entropy/CSPRNG contract (the one OS-coupled piece) → ChaCha20 →
-Poly1305 → ChaCha20-Poly1305 AEAD → the Curve25519 field → X25519 → Ed25519 →
-the per-arch intrinsic backend.
+`*os-entropy*` is the sole OS-coupled seam — a one-argument function returning
+raw entropy bytes. The default reads `/dev/urandom`; **modus rebinds it** to its
+hardware entropy source, and everything above it (the HMAC-DRBG behind
+`random-bytes`) is pure, portable computation.
+
+**Roadmap:** Poly1305 → ChaCha20-Poly1305 AEAD → the Curve25519 field → X25519
+→ Ed25519 → the per-arch intrinsic backend.
 
 ## Running the tests
 

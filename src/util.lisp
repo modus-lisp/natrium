@@ -13,6 +13,10 @@
   "ASCII STRING → fresh (unsigned-byte 8) vector."
   (map '(simple-array (unsigned-byte 8) (*)) #'char-code string))
 
+(defun u8cat (&rest parts)
+  "Concatenate byte sequences into a fresh u8v."
+  (apply #'concatenate '(simple-array (unsigned-byte 8) (*)) parts))
+
 (defun bytes= (a b)
   "Constant-time equality of two byte vectors: the running time depends only on
    the (public) length, never on where the first differing byte is.  Length
