@@ -30,7 +30,8 @@
                  (:file "x25519")
                  (:file "fe25519")
                  (:file "x25519-ct")
-                 (:file "ed25519"))))
+                 (:file "ed25519")
+                 (:file "ed25519-ct"))))
   :in-order-to ((test-op (test-op "natrium/test"))))
 
 (defsystem "natrium/test"

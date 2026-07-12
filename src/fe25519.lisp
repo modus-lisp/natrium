@@ -96,17 +96,25 @@
     (dotimes (i 5) (setf (aref h i) (* 121665 (aref f i))))
     (fe25519-carry h)))
 
-;;; --- inversion (z^(p-2)) -------------------------------------------------
-;;; The exponent p-2 is a fixed public constant, so square-and-multiply over its
+;;; --- exponentiation / inversion ------------------------------------------
+;;; The exponent E is a fixed public constant, so square-and-multiply over its
 ;;; bits runs the same operation sequence every call — constant-time in Z.
-(defun fe25519-invert (z)
-  "Multiplicative inverse of Z (= Z^(p-2))."
-  (let ((e (- *p25519* 2))
-        (result (fe-one))
-        (base (fe-copy z)))
-    (dotimes (i (integer-length (- *p25519* 2)) result)
+(defun fe25519-pow (z e)
+  "Z^E mod p by square-and-multiply over the fixed public exponent E."
+  (let ((result (fe-one)) (base (fe-copy z)))
+    (dotimes (i (integer-length e) result)
       (when (logbitp i e) (setf result (fe25519-mul result base)))
       (setf base (fe25519-sq base)))))
+
+(defun fe25519-invert (z)
+  "Multiplicative inverse of Z (= Z^(p-2))."
+  (fe25519-pow z (- *p25519* 2)))
+
+(defun fe25519-cmov (bit f g)
+  "If BIT (0/1) is 1, copy G's limbs into F; branch-free.  Mutates F."
+  (let ((mask (- (logand bit 1))))              ; 0 or all-ones
+    (dotimes (i 5)
+      (setf (aref f i) (logxor (aref f i) (logand mask (logxor (aref f i) (aref g i))))))))
 
 ;;; --- constant-time swap + freeze/serialize -------------------------------
 (defun fe25519-cswap (swap f g)

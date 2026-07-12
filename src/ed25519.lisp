@@ -107,15 +107,15 @@
           (aref c 31) (logior (logand (aref c 31) 127) 64))
     (le->uint c 0 32)))
 
-(defun ed25519-public-key (sk)
-  "32-byte Ed25519 public key for a 32-byte secret key SK."
+(defun ed25519-public-key-reference (sk)
+  "Big-integer reference (the differential oracle for ed25519-ct.lisp)."
   (declare (type u8v sk))
   (let* ((h (sha512 sk))
          (a (ed-clamp-scalar (subseq h 0 32))))
     (ed-encode (ed-mul a *ed-base*))))
 
-(defun ed25519-sign (sk message)
-  "Deterministic Ed25519 signature (64 bytes) of MESSAGE under secret key SK."
+(defun ed25519-sign-reference (sk message)
+  "Big-integer reference (the differential oracle for ed25519-ct.lisp)."
   (declare (type u8v sk message))
   (let* ((h (sha512 sk))
          (a (ed-clamp-scalar (subseq h 0 32)))
@@ -127,23 +127,18 @@
          (s (mod (+ r (* k a)) *l25519*)))
     (u8cat rp (uint->le s 32))))
 
-(defun ed25519-verify (pk message sig)
-  "Verify a 64-byte Ed25519 SIG on MESSAGE under 32-byte public key PK.  Returns
-   T or NIL.  Cofactorless check [S]B = R + [k]A (accepts RFC 8032 vectors)."
+(defun ed25519-verify-reference (pk message sig)
+  "Big-integer reference verify (the differential oracle for ed25519-ct.lisp).
+   Cofactorless check [S]B = R + [k]A (accepts RFC 8032 vectors)."
   (declare (type u8v pk message sig))
-  (when (/= (length sig) 64) (return-from ed25519-verify nil))
+  (when (/= (length sig) 64) (return-from ed25519-verify-reference nil))
   (let ((rraw (subseq sig 0 32))
         (s (le->uint sig 32 32)))
-    (when (>= s *l25519*) (return-from ed25519-verify nil))
+    (when (>= s *l25519*) (return-from ed25519-verify-reference nil))
     (let ((a-pt (ed-decode pk))
           (r-pt (ed-decode rraw)))
-      (when (or (null a-pt) (null r-pt)) (return-from ed25519-verify nil))
+      (when (or (null a-pt) (null r-pt)) (return-from ed25519-verify-reference nil))
       (let* ((k (mod (le->uint (sha512 (u8cat rraw pk message)) 0 64) *l25519*))
              (sb (ed-mul s *ed-base*))
              (rka (ed-add r-pt (ed-mul k a-pt))))
         (ed-point-equal sb rka)))))
-
-(defun ed25519-keypair ()
-  "Fresh Ed25519 keypair from the CSPRNG.  Returns (values SECRET-32 PUBLIC-32)."
-  (let ((sk (random-bytes 32)))
-    (values sk (ed25519-public-key sk))))
