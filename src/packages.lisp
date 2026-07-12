@@ -18,7 +18,9 @@
    ;; entropy + CSPRNG
    #:*os-entropy* #:os-entropy #:random-bytes
    #:drbg-instantiate #:drbg-generate #:drbg-reseed
-   ;; stream cipher
+   ;; stream cipher + AEAD
    #:chacha20 #:chacha20-block
+   #:poly1305-mac #:poly1305-key-gen
+   #:chacha20-poly1305-encrypt #:chacha20-poly1305-decrypt
    ;; small helpers
    #:ascii->bytes #:make-u8v #:u8cat #:bytes= #:u8v))

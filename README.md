@@ -49,6 +49,8 @@ incrementally, per arch, without touching the crypto above it.
 | HMAC-SHA256, HMAC-SHA512 | RFC 4231 |
 | HMAC-DRBG (CSPRNG) | NIST SP 800-90A / CAVP known-answer |
 | ChaCha20 | RFC 8439 (block KAT + encryption) |
+| Poly1305 | RFC 8439 |
+| ChaCha20-Poly1305 AEAD | RFC 8439 (+ round-trip + tamper-reject) |
 
 ```lisp
 (natrium:sha256 (natrium:ascii->bytes "abc"))   ; => 32-byte digest
@@ -58,6 +60,8 @@ incrementally, per arch, without touching the crypto above it.
 
 (natrium:random-bytes 32)                        ; CSPRNG (HMAC-DRBG over *os-entropy*)
 (natrium:chacha20 key nonce data :counter 1)     ; RFC 8439 stream XOR
+(natrium:chacha20-poly1305-encrypt key nonce pt aad)  ; => (values ciphertext tag)
+(natrium:chacha20-poly1305-decrypt key nonce ct tag aad)  ; => plaintext, or NIL if forged
 ```
 
 `*os-entropy*` is the sole OS-coupled seam — a one-argument function returning
@@ -65,8 +69,8 @@ raw entropy bytes. The default reads `/dev/urandom`; **modus rebinds it** to its
 hardware entropy source, and everything above it (the HMAC-DRBG behind
 `random-bytes`) is pure, portable computation.
 
-**Roadmap:** Poly1305 → ChaCha20-Poly1305 AEAD → the Curve25519 field → X25519
-→ Ed25519 → the per-arch intrinsic backend.
+**Roadmap:** the Curve25519 field (radix-2⁵¹) → X25519 → Ed25519 → the per-arch
+intrinsic backend. The symmetric side is complete.
 
 ## Running the tests
 

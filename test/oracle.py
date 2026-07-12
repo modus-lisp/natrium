@@ -73,3 +73,33 @@ ei2=bytes.fromhex('000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1
 no2=bytes.fromhex('202122232425262728292a2b2c2d2e2f')
 d2=HmacDrbg(ei2,no2,halg=hashlib.sha512)
 print('drbg sha512 vec    :', d2.generate(64).hex())
+
+# ---------- Poly1305 (RFC 8439) ----------
+def clamp(r): return r & 0x0ffffffc0ffffffc0ffffffc0fffffff
+def poly1305_mac(key,msg):
+    r=clamp(int.from_bytes(key[:16],'little')); s=int.from_bytes(key[16:32],'little')
+    p=(1<<130)-5; a=0
+    for i in range(0,len(msg),16):
+        blk=msg[i:i+16]; n=int.from_bytes(blk,'little')|(1<<(8*len(blk)))
+        a=((a+n)*r)%p
+    return ((a+s)&((1<<128)-1)).to_bytes(16,'little')
+
+# RFC 8439 2.5.2
+pk=bytes.fromhex('85d6be7857556d337f4452fe42d506a80103808afb0db2fd4abff6af4149f51b')
+pm=b"Cryptographic Forum Research Group"
+print('poly1305 2.5.2 tag :', poly1305_mac(pk,pm).hex())
+
+# ---------- ChaCha20-Poly1305 AEAD (RFC 8439 2.8) ----------
+def pad16(x): return b'\x00'*((16-len(x)%16)%16)
+def poly_keygen(key,nonce): return block(key,0,nonce)[:32]
+def aead_encrypt(key,nonce,pt,aad):
+    otk=poly_keygen(key,nonce); ct=chacha20(key,nonce,pt,counter=1)
+    md=aad+pad16(aad)+ct+pad16(ct)+len(aad).to_bytes(8,'little')+len(ct).to_bytes(8,'little')
+    return ct, poly1305_mac(otk,md)
+akey=bytes.fromhex('808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9f')
+anonce=bytes.fromhex('070000004041424344454647')
+aaad=bytes.fromhex('50515253c0c1c2c3c4c5c6c7')
+apt=b"Ladies and Gentlemen of the class of '99: If I could offer you only one tip for the future, sunscreen would be it."
+act,atag=aead_encrypt(akey,anonce,apt,aaad)
+print('aead 2.8.2 ct      :', act.hex())
+print('aead 2.8.2 tag     :', atag.hex())

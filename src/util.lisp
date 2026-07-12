@@ -17,6 +17,18 @@
   "Concatenate byte sequences into a fresh u8v."
   (apply #'concatenate '(simple-array (unsigned-byte 8) (*)) parts))
 
+(defun le->uint (bytes off len)
+  "Decode LEN little-endian bytes of BYTES at OFF into a non-negative integer."
+  (let ((n 0))
+    (dotimes (i len n)
+      (setf n (logior n (ash (aref bytes (+ off i)) (* 8 i)))))))
+
+(defun uint->le (n len)
+  "Encode non-negative integer N as LEN little-endian bytes (fresh u8v)."
+  (let ((out (make-u8v len)))
+    (dotimes (i len out)
+      (setf (aref out i) (logand #xff (ash n (* -8 i)))))))
+
 (defun bytes= (a b)
   "Constant-time equality of two byte vectors: the running time depends only on
    the (public) length, never on where the first differing byte is.  Length

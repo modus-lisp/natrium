@@ -111,6 +111,37 @@
              (n:drbg-generate d 64)
              "5a947e2ec811344b506f321e3f1fbde3fde96845301a7c1793e72b2071e1d984846eda8ee0e97301da2e6d07c4937b7a50c729a1ad16e594ab3dd96561709270"))
 
+    ;; ---- Poly1305 (RFC 8439 2.5.2) ----
+    (check "poly1305 mac (rfc8439 2.5.2)"
+           (n:poly1305-mac
+            (hex->bytes "85d6be7857556d337f4452fe42d506a80103808afb0db2fd4abff6af4149f51b")
+            (n:ascii->bytes "Cryptographic Forum Research Group"))
+           "a8061dc1305136c6c22b8baf0c0127a9")
+
+    ;; ---- ChaCha20-Poly1305 AEAD (RFC 8439 2.8.2) ----
+    (let ((key (hex->bytes "808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9f"))
+          (nonce (hex->bytes "070000004041424344454647"))
+          (aad (hex->bytes "50515253c0c1c2c3c4c5c6c7"))
+          (pt (n:ascii->bytes
+               "Ladies and Gentlemen of the class of '99: If I could offer you only one tip for the future, sunscreen would be it.")))
+      (multiple-value-bind (ct tag) (n:chacha20-poly1305-encrypt key nonce pt aad)
+        (check "aead encrypt ciphertext (rfc8439 2.8.2)" ct
+               "d31a8d34648e60db7b86afbc53ef7ec2a4aded51296e08fea9e2b5a736ee62d63dbea45e8ca9671282fafb69da92728b1a71de0a9e060b2905d6a5b67ecd3b3692ddbd7f2d778b8c9803aee328091b58fab324e4fad675945585808b4831d7bc3ff4def08e4b7a9de576d26586cec64b6116")
+        (check "aead encrypt tag (rfc8439 2.8.2)" tag "1ae10b594f09e26a7e902ecbd0600691")
+        ;; round-trip: decrypt returns the original plaintext
+        (incf *count*)
+        (let ((dec (n:chacha20-poly1305-decrypt key nonce ct tag aad)))
+          (if (and dec (n:bytes= dec pt))
+              (format t "  ok    aead decrypt round-trip~%")
+              (progn (incf *fails*) (format t "  FAIL  aead decrypt round-trip~%"))))
+        ;; tamper: a flipped ciphertext byte must fail authentication (=> NIL)
+        (incf *count*)
+        (let ((bad (copy-seq ct)))
+          (setf (aref bad 0) (logxor (aref bad 0) 1))
+          (if (null (n:chacha20-poly1305-decrypt key nonce bad tag aad))
+              (format t "  ok    aead rejects tampered ciphertext~%")
+              (progn (incf *fails*) (format t "  FAIL  aead accepted tampered ciphertext~%"))))))
+
     ;; ---- random-bytes smoke (exercises the OS-entropy → DRBG path) ----
     (incf *count*)
     (let ((a (n:random-bytes 40)) (b (n:random-bytes 40)))

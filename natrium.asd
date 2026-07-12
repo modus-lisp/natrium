@@ -24,7 +24,9 @@
                  (:file "hmac")
                  (:file "entropy")
                  (:file "drbg")
-                 (:file "chacha20"))))
+                 (:file "chacha20")
+                 (:file "poly1305")
+                 (:file "aead"))))
   :in-order-to ((test-op (test-op "natrium/test"))))
 
 (defsystem "natrium/test"
