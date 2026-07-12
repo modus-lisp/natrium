@@ -27,7 +27,8 @@
                  (:file "chacha20")
                  (:file "poly1305")
                  (:file "aead")
-                 (:file "x25519"))))
+                 (:file "x25519")
+                 (:file "ed25519"))))
   :in-order-to ((test-op (test-op "natrium/test"))))
 
 (defsystem "natrium/test"
