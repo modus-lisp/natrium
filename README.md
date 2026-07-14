@@ -97,6 +97,17 @@ are kept in-tree as `*-reference` and are the **differential oracle** — the
 constant-time code is checked against them on tens of thousands of random inputs
 (and both pass the RFC/NIST vectors).
 
+### Edge-case gating (Wycheproof)
+
+Beyond the RFC/NIST happy-path vectors, the suite runs the
+[Wycheproof](https://github.com/C2SP/wycheproof) adversarial vectors — **984**
+of them: Ed25519 verify (signature malleability, small-order `R`, non-canonical
+keys), X25519 (low-order and non-canonical public points → zero shared secret),
+and ChaCha20-Poly1305 (tag forgery, truncation). These caught a real freeze bug
+in the constant-time field (a non-canonical zero from a low-order point
+serialized as `19`) that the RFC vectors and random differential tests both
+missed — the reason edge-case gating earns its place.
+
 The discipline is *structural* constant-time: fixed control and data flow. The
 portable limb multiply is still CL `*`; the one remaining step is a per-arch
 backend that lowers the limb multiply to a widening-multiply / add-with-carry

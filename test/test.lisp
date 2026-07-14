@@ -3,7 +3,7 @@
 (defpackage #:natrium.test
   (:use #:cl)
   (:local-nicknames (#:n #:natrium))
-  (:export #:run-all))
+  (:export #:run-all #:run-wycheproof))
 
 (in-package #:natrium.test)
 
@@ -32,6 +32,42 @@
            (format t "  ok    ~a~%" name))
           (t (incf *fails*)
              (format t "  FAIL  ~a~%        got  ~a~%        want ~a~%" name got-hex want-hex)))))
+
+(defun load-sexp (name)
+  (with-open-file (s (asdf:system-relative-pathname :natrium (format nil "test/~a" name)))
+    (read s)))
+
+(defun run-wycheproof ()
+  "Adversarial edge-case gate: Wycheproof (C2SP) vectors for Ed25519 verify,
+   X25519, and ChaCha20-Poly1305.  Exercises signature malleability, small-order
+   points, non-canonical encodings, tag forgery — the cases RFC vectors omit."
+  (let ((fails 0) (total 0))
+    (flet ((note (fmt &rest a) (when (< fails 20) (apply #'format t fmt a))))
+      ;; Ed25519: verify must accept 'valid', reject 'invalid'
+      (dolist (row (load-sexp "wycheproof-ed25519.sexp"))
+        (destructuring-bind (tcid pk msg sig valid) row
+          (incf total)
+          (let ((got (and (n:ed25519-verify (hex->bytes pk) (hex->bytes msg) (hex->bytes sig)) t)))
+            (unless (eq got valid)
+              (incf fails) (note "  ed25519 tc~a: got ~a want ~a~%" tcid got valid)))))
+      ;; X25519: computed shared secret must match (valid + acceptable both do)
+      (dolist (row (load-sexp "wycheproof-x25519.sexp"))
+        (destructuring-bind (tcid priv pub shared) row
+          (incf total)
+          (unless (n:bytes= (n:x25519 (hex->bytes priv) (hex->bytes pub)) (hex->bytes shared))
+            (incf fails) (note "  x25519 tc~a mismatch~%" tcid))))
+      ;; ChaCha20-Poly1305: decrypt returns msg iff authentic
+      (dolist (row (load-sexp "wycheproof-aead.sexp"))
+        (destructuring-bind (tcid key iv aad msg ct tag valid) row
+          (incf total)
+          (let* ((dec (n:chacha20-poly1305-decrypt (hex->bytes key) (hex->bytes iv)
+                                                    (hex->bytes ct) (hex->bytes tag) (hex->bytes aad)))
+                 (got (and dec (n:bytes= dec (hex->bytes msg)) t)))
+            (unless (eq got valid)
+              (incf fails) (note "  aead tc~a: got ~a want ~a~%" tcid got valid))))))
+    (format t "~&Wycheproof edge-case vectors: ~d/~d passed~%" (- total fails) total)
+    (when (plusp fails) (error "natrium: ~d Wycheproof failure(s)" fails))
+    t))
 
 (defun rfc7748-iterate (n)
   "RFC 7748 5.2 iterated test: k=u=basepoint(9); repeat (k,u)=(x25519(k,u),k)

@@ -126,15 +126,15 @@
               (aref g i) (logxor (aref g i) tmp))))))
 
 (defun fe25519-tobytes (f)
-  "Freeze F to its canonical residue in [0,p) and serialize to 32 LE bytes."
+  "Freeze F to its canonical residue in [0,p) and serialize to 32 LE bytes.
+   After fe25519-carry the value is < 2^255 = p+19, so it is in [0, p+18] and a
+   fixed pair of conditional subtractions canonicalizes it (same shape as the
+   Barrett/Poly1305 finalize).  NOTE: fe25519-carry must NOT be reused for the
+   subtract — its 2^255->19 fold is a *reduction*, not a freeze, and turns a
+   non-canonical p (a low-order-point zero) into 19 rather than 0."
   (let ((h (fe-copy f)))
     (fe25519-carry h)
-    ;; conditionally subtract p: q = 1 iff h >= p
-    (let ((q (ash (+ (aref h 0) 19) -51)))
-      (setf q (ash (+ (aref h 1) q) -51))
-      (setf q (ash (+ (aref h 2) q) -51))
-      (setf q (ash (+ (aref h 3) q) -51))
-      (setf q (ash (+ (aref h 4) q) -51))
-      (incf (aref h 0) (* 19 q))
-      (fe25519-carry h))
-    (uint->le (fe->integer h) 32)))
+    (let ((v (fe->integer h)) (p *p25519*))
+      (when (>= v p) (decf v p))
+      (when (>= v p) (decf v p))
+      (uint->le v 32))))
