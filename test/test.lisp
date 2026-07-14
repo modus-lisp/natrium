@@ -101,6 +101,12 @@
       "abcdefghbcdefghicdefghijdefghijkefghijklfghijklmghijklmnhijklmnoijklmnopjklmnopqklmnopqrlmnopqrsmnopqrstnopqrstu"))
            "8e959b75dae313da8cf4f72814fc143f8f7779c6eb9f7fa17299aeadb6889018501d289e4900f7e4331b99dec4b5433ac7d329eeb6dd26545e96e55b874be909")
 
+    ;; ---- SHA-384 (FIPS 180-4) ----
+    (check "sha384 empty" (n:sha384 (n:ascii->bytes ""))
+           "38b060a751ac96384cd9327eb1b1e36a21fdb71114be07434c0cc7bf63f6e1da274edebfe76f65fbd51ad2f14898b95b")
+    (check "sha384 abc" (n:sha384 (n:ascii->bytes "abc"))
+           "cb00753f45a35e8bb5a03d699ac65007272c32ab0eded1631a8b605a43ff5bed8086072ba1e7cc2358baeca134c825a7")
+
     ;; ---- HMAC-SHA256 (RFC 4231) ----
     (check "hmac-sha256 rfc4231-1"
            (n:hmac-sha256 (rep-byte #x0b 20) (n:ascii->bytes "Hi There"))
@@ -112,6 +118,14 @@
            (n:hmac-sha256 (hex->bytes "0102030405060708090a0b0c0d0e0f10111213141516171819")
                           (rep-byte #xcd 50))
            "82558a389a443c0ea4cc819899f2083a85f0faa3e578f8077a2e3ff46729665b")
+
+    ;; ---- HMAC-SHA384 (RFC 4231) ----
+    (check "hmac-sha384 rfc4231-1"
+           (n:hmac-sha384 (rep-byte #x0b 20) (n:ascii->bytes "Hi There"))
+           "afd03944d84895626b0825f4ab46907f15f9dadbe4101ec682aa034c7cebc59cfaea9ea9076ede7f4af152e8b2fa9cb6")
+    (check "hmac-sha384 rfc4231-2"
+           (n:hmac-sha384 (n:ascii->bytes "Jefe") (n:ascii->bytes "what do ya want for nothing?"))
+           "af45d2e376484031617f78d2b58a6b1b9c7ef464f5a01b47e42ec3736322445e8e2240ca5e69e2c78b3239ecfab21649")
 
     ;; ---- HMAC-SHA512 (RFC 4231) ----
     (check "hmac-sha512 rfc4231-1"

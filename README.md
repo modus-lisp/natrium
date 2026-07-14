@@ -52,9 +52,9 @@ incrementally, per arch, without touching the crypto above it.
 
 | primitive | vectors |
 |---|---|
-| SHA-256, SHA-512 | FIPS 180-4 |
-| HMAC-SHA256, HMAC-SHA512 | RFC 4231 |
-| HKDF-SHA256, HKDF-SHA512 | RFC 5869 |
+| SHA-256, SHA-384, SHA-512 | FIPS 180-4 |
+| HMAC-SHA256/384/512 | RFC 4231 |
+| HKDF-SHA256/384/512 | RFC 5869 |
 | HMAC-DRBG (CSPRNG) | NIST SP 800-90A / CAVP known-answer |
 | ChaCha20 | RFC 8439 (block KAT + encryption) |
 | Poly1305 | RFC 8439 |

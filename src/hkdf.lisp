@@ -35,6 +35,10 @@
   "HKDF-SHA256 (RFC 5869): derive LEN bytes from IKM with SALT and context INFO."
   (hkdf #'hmac-sha256 32 salt ikm info len))
 
+(defun hkdf-sha384 (salt ikm info len)
+  "HKDF-SHA384: derive LEN bytes from IKM with SALT and context INFO."
+  (hkdf #'hmac-sha384 48 salt ikm info len))
+
 (defun hkdf-sha512 (salt ikm info len)
   "HKDF-SHA512: derive LEN bytes from IKM with SALT and context INFO."
   (hkdf #'hmac-sha512 64 salt ikm info len))

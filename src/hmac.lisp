@@ -26,6 +26,10 @@
   "HMAC-SHA256 of MSG under KEY → fresh 32-byte digest."
   (hmac #'sha256 64 key msg))
 
+(defun hmac-sha384 (key msg)
+  "HMAC-SHA384 of MSG under KEY → fresh 48-byte digest."
+  (hmac #'sha384 128 key msg))
+
 (defun hmac-sha512 (key msg)
   "HMAC-SHA512 of MSG under KEY → fresh 64-byte digest."
   (hmac #'sha512 128 key msg))

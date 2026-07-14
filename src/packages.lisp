@@ -16,10 +16,10 @@
     reference; the constant-time limb backend is the remaining hardening step.")
   (:export
    ;; hashing
-   #:sha256 #:sha512
-   #:hmac #:hmac-sha256 #:hmac-sha512
+   #:sha256 #:sha384 #:sha512
+   #:hmac #:hmac-sha256 #:hmac-sha384 #:hmac-sha512
    ;; key derivation
-   #:hkdf #:hkdf-extract #:hkdf-expand #:hkdf-sha256 #:hkdf-sha512
+   #:hkdf #:hkdf-extract #:hkdf-expand #:hkdf-sha256 #:hkdf-sha384 #:hkdf-sha512
    ;; entropy + CSPRNG
    #:*os-entropy* #:os-entropy #:random-bytes
    #:drbg-instantiate #:drbg-generate #:drbg-reseed

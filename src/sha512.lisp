@@ -37,17 +37,27 @@
   (logand #xffffffffffffffff (logior (ash x (- n)) (ash x (- 64 n)))))
 (defun shr64 (x n) (declare (type u64 x)) (ash x (- n)))
 
-(defun sha512 (msg)
-  "SHA-512 of byte vector MSG → fresh 64-byte big-endian digest."
+(declaim (type (simple-array u64 (8)) +sha512-init+ +sha384-init+))
+(defparameter +sha512-init+
+  (make-array 8 :element-type 'u64 :initial-contents
+    '(#x6a09e667f3bcc908 #xbb67ae8584caa73b #x3c6ef372fe94f82b #xa54ff53a5f1d36f1
+      #x510e527fade682d1 #x9b05688c2b3e6c1f #x1f83d9abfb41bd6b #x5be0cd19137e2179)))
+(defparameter +sha384-init+
+  (make-array 8 :element-type 'u64 :initial-contents
+    '(#xcbbb9d5dc1059ed8 #x629a292a367cd507 #x9159015a3070dd17 #x152fecd8f70e5939
+      #x67332667ffc00b31 #x8eb44a8768581511 #xdb0c2e0d64f98fa7 #x47b5481dbefa4fa4)))
+
+(defun %sha512-digest (msg init nbytes)
+  "Run the SHA-512 compression over MSG from the 8-word INIT; return the leading
+   NBYTES of the big-endian hash (64 for SHA-512, 48 for SHA-384)."
   (let* ((ml (length msg))
          (bitlen (* ml 8))
          ;; pad to a multiple of 128; need +1 (0x80) +16 (128-bit length)
          (padlen (let ((r (mod (+ ml 17) 128))) (if (zerop r) (+ ml 17) (+ ml 17 (- 128 r)))))
          (m (make-array padlen :element-type '(unsigned-byte 8) :initial-element 0))
-         (h (make-array 8 :element-type 'u64 :initial-contents
-              '(#x6a09e667f3bcc908 #xbb67ae8584caa73b #x3c6ef372fe94f82b #xa54ff53a5f1d36f1
-                #x510e527fade682d1 #x9b05688c2b3e6c1f #x1f83d9abfb41bd6b #x5be0cd19137e2179)))
+         (h (make-array 8 :element-type 'u64))
          (w (make-array 80 :element-type 'u64 :initial-element 0)))
+    (replace h init)
     (replace m msg)
     (setf (aref m ml) #x80)
     (dotimes (i 16)                                 ; 128-bit big-endian bit length
@@ -81,9 +91,18 @@
               (aref h 5) (logand #xffffffffffffffff (+ (aref h 5) f))
               (aref h 6) (logand #xffffffffffffffff (+ (aref h 6) g))
               (aref h 7) (logand #xffffffffffffffff (+ (aref h 7) hh)))))
-    (let ((out (make-array 64 :element-type '(unsigned-byte 8))))
-      (dotimes (i 8)
+    (let ((out (make-array nbytes :element-type '(unsigned-byte 8))))
+      (dotimes (i (ceiling nbytes 8))
         (let ((v (aref h i)) (o (* i 8)))
           (dotimes (b 8)
-            (setf (aref out (+ o b)) (logand #xff (ash v (* -8 (- 7 b))))))))
+            (when (< (+ o b) nbytes)
+              (setf (aref out (+ o b)) (logand #xff (ash v (* -8 (- 7 b)))))))))
       out)))
+
+(defun sha512 (msg)
+  "SHA-512 of byte vector MSG → fresh 64-byte big-endian digest."
+  (%sha512-digest msg +sha512-init+ 64))
+
+(defun sha384 (msg)
+  "SHA-384 (FIPS 180-4) of byte vector MSG → fresh 48-byte big-endian digest."
+  (%sha512-digest msg +sha384-init+ 48))
