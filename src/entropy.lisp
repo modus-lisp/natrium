@@ -24,5 +24,15 @@
    create entropy that isn't there.")
 
 (defun os-entropy (n)
-  "N bytes from the current OS entropy source (see *OS-ENTROPY*)."
-  (funcall *os-entropy* n))
+  "N full-entropy bytes from the current OS entropy source (see *OS-ENTROPY*).
+   Fails closed: the *OS-ENTROPY* seam is the library's most safety-critical trust
+   boundary (modus reimplements it), so its result is validated rather than
+   trusted — a wrong length or an all-zero buffer signals an error instead of
+   silently under-seeding the DRBG."
+  (let ((b (funcall *os-entropy* n)))
+    (unless (and (typep b 'sequence) (= (length b) n))
+      (error "natrium: *os-entropy* returned ~a bytes, expected ~d"
+             (ignore-errors (length b)) n))
+    (when (and (plusp n) (every #'zerop b))
+      (error "natrium: *os-entropy* returned an all-zero buffer (degenerate source)"))
+    b))

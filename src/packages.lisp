@@ -10,10 +10,13 @@
     or branches; secret-key paths are written in a constant-time discipline and
     gated on RFC/NIST/Wycheproof vectors.
 
-    The full primitive set is implemented and vector-gated: SHA-256/512 + HMAC,
-    HMAC-DRBG (CSPRNG), ChaCha20, Poly1305, ChaCha20-Poly1305 AEAD, X25519, and
-    Ed25519.  Field/scalar arithmetic is currently a portable big-integer
-    reference; the constant-time limb backend is the remaining hardening step.")
+    The full primitive set is implemented and vector-gated: SHA-256/384/512 +
+    HMAC, HKDF, HMAC-DRBG (CSPRNG), ChaCha20, Poly1305, ChaCha20-Poly1305 AEAD,
+    X25519, and Ed25519.  The public curve/field paths ARE the constant-time
+    limb backend (fe25519 + the constant-time X25519/Ed25519/Poly1305); each
+    keeps its big-integer implementation in-tree as a *-reference differential
+    oracle.  The remaining hardening step is a per-architecture intrinsic backend
+    (widening multiply / add-with-carry) that lowers the portable limb multiply.")
   (:export
    ;; hashing
    #:sha256 #:sha384 #:sha512

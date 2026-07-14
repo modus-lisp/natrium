@@ -1,13 +1,12 @@
 ;;;; x25519.lisp — X25519 Diffie-Hellman on Curve25519 (RFC 7748).
 ;;;;
 ;;;; Portable big-integer reference: field elements are CL integers reduced mod
-;;;; p = 2^255-19.  Exact and gated against the RFC 7748 vectors (which are
-;;;; ground truth), and the differential oracle for a future constant-time
-;;;; 5x51-bit-limb backend.  The Montgomery ladder already uses a branchless
-;;;; cswap and a fixed 255-iteration count, so its control flow is constant-time;
-;;;; what is NOT yet constant-time is the big-integer field arithmetic itself
-;;;; (variable-time multiply/reduce).  The scalar is secret, so the limb backend
-;;;; is required before this guards real keys — see the roadmap.
+;;;; p = 2^255-19.  This is NOT the public X25519 — the public, constant-time
+;;;; path is the fe25519 limb ladder in x25519-ct.lisp.  This file is that
+;;;; ladder's differential oracle: exact, gated against the RFC 7748 vectors, and
+;;;; deliberately variable-time (the scalar is secret, so it must not guard real
+;;;; keys).  It also defines the shared field constant/helpers (*p25519*,
+;;;; fe-pow, fe-inv) that ed25519.lisp reuses.
 
 (in-package #:natrium)
 

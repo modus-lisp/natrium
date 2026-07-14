@@ -129,9 +129,14 @@
   "Freeze F to its canonical residue in [0,p) and serialize to 32 LE bytes.
    After fe25519-carry the value is < 2^255 = p+19, so it is in [0, p+18] and a
    fixed pair of conditional subtractions canonicalizes it (same shape as the
-   Barrett/Poly1305 finalize).  NOTE: fe25519-carry must NOT be reused for the
-   subtract — its 2^255->19 fold is a *reduction*, not a freeze, and turns a
-   non-canonical p (a low-order-point zero) into 19 rather than 0."
+   Barrett/Poly1305 finalize).  Those `(>= v p)` subtractions branch on a
+   SECRET-derived value (the X25519 shared secret; the encoded point in signing),
+   not just public data — this is the standard, accepted Curve25519 freeze leak
+   (a comparison at the very top of the range), and it is one of the disclosed
+   non-instruction-level-constant-time spots the intrinsic backend will close.
+   NOTE: fe25519-carry must NOT be reused for the subtract — its 2^255->19 fold
+   is a *reduction*, not a freeze, and turns a non-canonical p (a low-order-point
+   zero) into 19 rather than 0."
   (let ((h (fe-copy f)))
     (fe25519-carry h)
     (let ((v (fe->integer h)) (p *p25519*))

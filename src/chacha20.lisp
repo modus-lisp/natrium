@@ -59,6 +59,10 @@
   (declare (type u8v key nonce data))
   (let* ((len (length data))
          (out (make-u8v len)))
+    ;; fail closed rather than silently wrap the 32-bit block counter (which
+    ;; would reuse keystream) on an absurdly long (>256 GiB) message
+    (when (>= (+ counter (ceiling len 64)) (ash 1 32))
+      (error "chacha20: 32-bit block counter would wrap (message too long)"))
     (loop for blk from 0
           for base from 0 below len by 64 do
       (let ((ks (chacha20-block key (+ counter blk) nonce)))

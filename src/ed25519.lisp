@@ -7,11 +7,13 @@
 ;;;; cannot occur here by construction.
 ;;;;
 ;;;; Portable big-integer reference (field elements are CL integers, points in
-;;;; extended twisted-Edwards coordinates via the unified addition law).  Field
-;;;; arithmetic is variable-time; scalar multiplication is a plain double-and-add
-;;;; and thus secret-dependent — this is the differential oracle for a future
-;;;; constant-time limb backend, not yet a side-channel-hardened signer.  It
-;;;; reuses fe-inv / fe-pow / *p25519* from x25519.lisp.
+;;;; extended twisted-Edwards coordinates via the unified addition law).  This is
+;;;; NOT the public Ed25519 — the public, constant-time path is in ed25519-ct.lisp
+;;;; (point arithmetic over fe25519, double-and-add-always scalar mult, Barrett
+;;;; scalar reduce).  This file is that path's differential oracle: variable-time
+;;;; (plain double-and-add branches on the secret scalar), so its *-reference
+;;;; functions must not sign real keys.  Reuses fe-inv / fe-pow / *p25519* from
+;;;; x25519.lisp.
 
 (in-package #:natrium)
 

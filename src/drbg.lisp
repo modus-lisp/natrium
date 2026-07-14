@@ -19,14 +19,15 @@
   (v      nil :type u8v)
   (reseed-counter 1 :type integer))
 
-;;; HMAC_DRBG_Update (SP 800-90A 10.1.2.2).  PROVIDED is a u8v of provided_data,
-;;; or NIL meaning "no data supplied" (the spec's Null → the second HMAC pair is
-;;; skipped).  An empty-but-non-NIL vector still runs both pairs.
+;;; HMAC_DRBG_Update (SP 800-90A 10.1.2.2).  PROVIDED is the provided_data byte
+;;; vector; NIL *or a zero-length vector* is the spec's Null (skip the second
+;;; HMAC pair) — treating empty as Null keeps a caller who passes (make-u8v 0)
+;;; to mean "no additional input" on the CAVP-conformant path.
 (defun drbg-update (d provided)
   (let ((hm (drbg-hmac d)) (k (drbg-k d)) (v (drbg-v d)))
     (setf k (funcall hm k (u8cat v (make-u8v 1 0) (or provided (make-u8v 0)))))
     (setf v (funcall hm k v))
-    (when provided
+    (when (and provided (plusp (length provided)))
       (setf k (funcall hm k (u8cat v (make-u8v 1 1) provided)))
       (setf v (funcall hm k v)))
     (setf (drbg-k d) k (drbg-v d) v)))
@@ -47,11 +48,18 @@
   (drbg-update d (u8cat entropy (or additional (make-u8v 0))))
   (setf (drbg-reseed-counter d) 1))
 
+(defparameter *drbg-reseed-max* (expt 2 48)
+  "SP 800-90A reseed_interval upper bound: generate fails closed past this.")
+
 (defun drbg-generate (d n &optional additional)
   "Generate N bytes (SP 800-90A 10.1.2.5).  ADDITIONAL is optional additional
-   input (u8v) or NIL."
-  (let ((hm (drbg-hmac d)) (outlen (drbg-outlen d)))
-    (when additional (drbg-update d additional))
+   input (u8v) or NIL (a zero-length vector is treated as NIL).  Signals an error
+   once the reseed interval is exceeded (the spec's 'reseed required')."
+  (when (> (drbg-reseed-counter d) *drbg-reseed-max*)
+    (error "natrium DRBG: reseed required (reseed interval exceeded)"))
+  (let ((hm (drbg-hmac d)) (outlen (drbg-outlen d))
+        (add (and additional (plusp (length additional)) additional)))
+    (when add (drbg-update d add))
     (let ((out (make-u8v n)) (pos 0))
       (loop while (< pos n) do
         (let ((v (funcall hm (drbg-k d) (drbg-v d))))
@@ -59,7 +67,7 @@
           (let ((take (min outlen (- n pos))))
             (replace out v :start1 pos :end2 take)
             (incf pos take))))
-      (drbg-update d additional)                 ; ADDITIONAL may be NIL (= Null)
+      (drbg-update d add)                         ; ADD is NIL when Null (= spec)
       (incf (drbg-reseed-counter d))
       out)))
 
