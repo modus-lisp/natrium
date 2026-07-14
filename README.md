@@ -47,6 +47,7 @@ incrementally, per arch, without touching the crypto above it.
 |---|---|
 | SHA-256, SHA-512 | FIPS 180-4 |
 | HMAC-SHA256, HMAC-SHA512 | RFC 4231 |
+| HKDF-SHA256, HKDF-SHA512 | RFC 5869 |
 | HMAC-DRBG (CSPRNG) | NIST SP 800-90A / CAVP known-answer |
 | ChaCha20 | RFC 8439 (block KAT + encryption) |
 | Poly1305 | RFC 8439 |
@@ -69,6 +70,7 @@ incrementally, per arch, without touching the crypto above it.
 (natrium:ed25519-keypair)                        ; => (values secret public)
 (natrium:ed25519-sign secret message)            ; => 64-byte signature (deterministic)
 (natrium:ed25519-verify public message sig)      ; => t / nil
+(natrium:hkdf-sha256 salt shared-secret info 64) ; => 64 bytes of session keys
 ```
 
 `*os-entropy*` is the sole OS-coupled seam — a one-argument function returning

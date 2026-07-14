@@ -22,6 +22,7 @@
                  (:file "sha256")
                  (:file "sha512")
                  (:file "hmac")
+                 (:file "hkdf")
                  (:file "entropy")
                  (:file "drbg")
                  (:file "chacha20")
