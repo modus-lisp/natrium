@@ -5,10 +5,17 @@ libraries — its own hashing, its own arithmetic. `natrium` implements the mode
 constant-time primitive set (the [NaCl](https://nacl.cr.yp.to/) / libsodium
 family): SHA-2 + HMAC, ChaCha20-Poly1305, X25519, Ed25519.
 
-The name is the Latin for sodium — the *Na* in NaCl. The suite is chosen on
-purpose: these primitives are **safe to implement without secret-dependent
-tables or branches**, which is exactly what a hand-written, auditable
-implementation needs. (AES-GCM, RSA, and the NIST P-curves — the
+The name is a small pun. *Natrium* is Latin for sodium — which is why sodium's
+chemical symbol is **Na**. Add chlorine and you get **NaCl**: sodium chloride,
+common table salt — and also the name of Daniel J. Bernstein's crypto library
+(pronounced *"salt"*), whose primitive set this implements;
+[libsodium](https://doc.libsodium.org/) is NaCl's widely-used descendant. So
+`natrium` is the sodium in the salt: the same modern primitives, hand-built in
+Common Lisp.
+
+That set is chosen on purpose: these primitives are **safe to implement without
+secret-dependent tables or branches**, which is exactly what a hand-written,
+auditable implementation needs. (AES-GCM, RSA, and the NIST P-curves — the
 timing-footgun primitives — are deliberately *not* here.)
 
 ## Why it exists
@@ -20,8 +27,8 @@ different compiler it runs as a slow portable fallback anyway. If we're going to
 run portable, we'd rather run *our own* code — self-contained, readable, and
 written in a constant-time discipline from the start.
 
-The design mirrors [`secp256k1-fast`](https://github.com/ynniv): a **portable
-reference is the default and the differential oracle**, and any per-architecture
+The design mirrors its sibling `secp256k1-fast`: a **portable reference is the
+default and the differential oracle**, and any per-architecture
 fast path (widening multiply / add-with-carry, expressed as a small set of
 compiler intrinsics, *not* whole-operation assembly) slots in behind it and is
 checked against the reference. Correctness is arch-independent; speed lands
