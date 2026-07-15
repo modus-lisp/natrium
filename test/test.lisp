@@ -195,6 +195,16 @@
              (n:drbg-generate d 64)
              "5a947e2ec811344b506f321e3f1fbde3fde96845301a7c1793e72b2071e1d984846eda8ee0e97301da2e6d07c4937b7a50c729a1ad16e594ab3dd96561709270"))
 
+    ;; ---- original ChaCha20 (64-bit counter/nonce; used by SSH) ----
+    (check "chacha20-original zero vector"
+           (n:chacha20-original-block (make-array 32 :element-type '(unsigned-byte 8) :initial-element 0)
+                                      0 (make-array 8 :element-type '(unsigned-byte 8) :initial-element 0))
+           "76b8e0ada0f13d90405d6ae55386bd28bdd219b8a08ded1aa836efcc8b770dc7da41597c5157488d7724e03fb8d84a376a43b8f41518a11cc387b669b2ee6586")
+    (check "chacha20-original counter/nonce layout"
+           (n:chacha20-original-block (hex->bytes "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f")
+                                      1 (hex->bytes "000000090000004a"))
+           "98f17a63810d031c3693986691316d20b7b1f9d11f8c57ae8376ad21a144f193f2ee4aee752d1e62833da3edfd63feda04efb2a851229d21397d0cdb938a7eed")
+
     ;; ---- Poly1305 (RFC 8439 2.5.2) ----
     (check "poly1305 mac (rfc8439 2.5.2)"
            (n:poly1305-mac

@@ -28,6 +28,7 @@
    #:drbg-instantiate #:drbg-generate #:drbg-reseed
    ;; stream cipher + AEAD
    #:chacha20 #:chacha20-block
+   #:chacha20-original #:chacha20-original-block
    #:poly1305-mac #:poly1305-key-gen
    #:chacha20-poly1305-encrypt #:chacha20-poly1305-decrypt
    ;; X25519 key agreement
