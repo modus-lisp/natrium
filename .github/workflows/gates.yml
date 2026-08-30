@@ -1,0 +1,22 @@
+name: gates
+on: [push, pull_request]
+
+# ONE PLATFORM ON PURPOSE.  This is portable Common Lisp with no FFI and no platform
+# calls, so a second runner would re-prove the same arithmetic on a different kernel.
+# The repos that genuinely differ per platform — glass-sdl for SDL, kiln for the
+# container and a fresh Mac — say so in their own workflows.  This one does not.
+jobs:
+  gates:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - name: Install SBCL
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq sbcl
+      - name: Tests
+        # The tree is rooted at THIS checkout, so the gate tests the code in front of
+        # it rather than whatever a local-projects symlink happens to point at.
+        env:
+          CL_SOURCE_REGISTRY: '(:source-registry (:tree "${{ github.workspace }}/") :inherit-configuration)'
+        run: sbcl --non-interactive --eval '(require :asdf)' --eval '(asdf:test-system "natrium")'
