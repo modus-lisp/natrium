@@ -77,6 +77,14 @@
 (defparameter *drbg-reseed-interval* (expt 2 20)
   "Generate calls between automatic reseeds of the process-global DRBG.")
 
+;;; On modus, threads and actors share no state, so the process-global DRBG
+;;; is per COMPUTATION there: each thread and actor gets its own, seeded from
+;;; the OS, when it first asks.  (Filling a shared global from a worker would
+;;; be a shared-state write, which modus refuses.)
+#+modus
+(let ((reg (find-symbol "REGISTER-PER-COMPUTATION-SPECIAL" "COMMON-LISP-USER")))
+  (when (and reg (fboundp reg)) (funcall reg '*default-drbg*)))
+
 (defun ensure-default-drbg ()
   (or *default-drbg*
       (setf *default-drbg*
