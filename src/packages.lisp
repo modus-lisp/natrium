@@ -42,17 +42,27 @@
   (:use #:cl)
   (:local-nicknames (#:n #:natrium))
   (:documentation
-   "The Noise IK handshake and transport, generic over the DH group.  The curve
+   "The Noise IK and XK handshakes and transport, generic over the DH group.  The curve
     enters only through a NOISE-SUITE (key generation, encoding, DH, pre-message).
     See src/noise.lisp for the authority and the FIPS deviations it implements.")
   (:export
    #:noise-suite #:make-noise-suite #:noise-suite-name #:noise-suite-ik-name
-   #:noise-suite-pubkey-size
+   #:noise-suite-xk-name #:noise-suite-pubkey-size
    #:noise-error #:noise-error-reason
-   #:ik-msg1-size #:ik-msg2-size
+   #:ik-msg1-size #:ik-msg2-size #:xk-msg1-size #:xk-msg2-size #:xk-msg3-size
    #:make-ik-initiator #:make-ik-responder
    #:ik-write-message-1 #:ik-read-message-1
    #:ik-write-message-2 #:ik-read-message-2
+   #:make-xk-initiator #:make-xk-responder
+   #:xk-write-message-1 #:xk-read-message-1
+   #:xk-write-message-2 #:xk-read-message-2
+   #:xk-write-message-3 #:xk-read-message-3
    #:handshake-hash #:hs-remote-epoch #:hs-remote-static
    #:handshake-into-session #:session-encrypt #:session-decrypt
-   #:session-decrypt-with-counter #:session-handshake-hash))
+   #:session-decrypt-with-counter #:session-handshake-hash
+   #:session-current-send-counter #:session-encrypt-with-aad
+   #:session-check-replay #:session-decrypt-with-replay-check
+   #:session-reset-replay-window #:session-replay
+   ;; replay window (replay.rs)
+   #:+replay-window-size+ #:replay-window #:make-replay-window
+   #:replay-window-highest #:replay-check #:replay-accept #:replay-reset))
