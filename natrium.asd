@@ -32,7 +32,9 @@
                  (:file "fe25519")
                  (:file "x25519-ct")
                  (:file "ed25519")
-                 (:file "ed25519-ct"))))
+                 (:file "ed25519-ct")
+                 ;; Noise IK over a caller-supplied DH group (no curve dependency).
+                 (:file "noise"))))
   :in-order-to ((test-op (test-op "natrium/test"))))
 
 (defsystem "natrium/test"

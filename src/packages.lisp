@@ -37,3 +37,22 @@
    #:ed25519-public-key #:ed25519-sign #:ed25519-verify #:ed25519-keypair
    ;; small helpers
    #:ascii->bytes #:make-u8v #:u8cat #:bytes= #:u8v))
+
+(defpackage #:natrium.noise
+  (:use #:cl)
+  (:local-nicknames (#:n #:natrium))
+  (:documentation
+   "The Noise IK handshake and transport, generic over the DH group.  The curve
+    enters only through a NOISE-SUITE (key generation, encoding, DH, pre-message).
+    See src/noise.lisp for the authority and the FIPS deviations it implements.")
+  (:export
+   #:noise-suite #:make-noise-suite #:noise-suite-name #:noise-suite-ik-name
+   #:noise-suite-pubkey-size
+   #:noise-error #:noise-error-reason
+   #:ik-msg1-size #:ik-msg2-size
+   #:make-ik-initiator #:make-ik-responder
+   #:ik-write-message-1 #:ik-read-message-1
+   #:ik-write-message-2 #:ik-read-message-2
+   #:handshake-hash #:hs-remote-epoch #:hs-remote-static
+   #:handshake-into-session #:session-encrypt #:session-decrypt
+   #:session-decrypt-with-counter #:session-handshake-hash))
