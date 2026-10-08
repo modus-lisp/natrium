@@ -57,7 +57,8 @@
    #:xk-write-message-1 #:xk-read-message-1
    #:xk-write-message-2 #:xk-read-message-2
    #:xk-write-message-3 #:xk-read-message-3
-   #:handshake-hash #:hs-remote-epoch #:hs-remote-static
+   #:handshake-hash #:hs-remote-epoch #:hs-remote-static #:hs-progress
+   #:ik-try-read-message-2 #:xk-try-read-message-2 #:xk-try-read-message-3
    #:handshake-into-session #:session-encrypt #:session-decrypt
    #:session-decrypt-with-counter #:session-handshake-hash
    #:session-current-send-counter #:session-encrypt-with-aad

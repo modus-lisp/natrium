@@ -411,6 +411,57 @@
     (setf (hs-progress hs) :complete)
     hs))
 
+;;; --- Rolling-back reads (handshake.rs try_read_message_2, try_read_xk_message_2,
+;;; try_read_xk_message_3) -------------------------------------------------------
+;;;
+;;; The plain readers mix the sender's ephemeral (and DH results) into the
+;;; symmetric state, and advance the cipher nonce, BEFORE the AEAD that
+;;; authenticates the message, so a message that fails partway leaves a
+;;; handshake the genuine message can no longer complete.  Upstream's try_read_*
+;;; snapshot exactly the fields the plain reader writes and put them back on
+;;; failure; these do the same.  The saved sets are upstream's, field for field:
+;;;
+;;;   try_read_message_2      symmetric, remote_ephemeral, remote_epoch, progress
+;;;   try_read_xk_message_2   symmetric, remote_ephemeral, remote_epoch, progress
+;;;   try_read_xk_message_3   symmetric, remote_static,    remote_epoch, progress
+;;;
+;;; As upstream warns, the mirror is manual: a new write in a plain reader must
+;;; be added to its saved set here.  The symmetric state is copied deeply
+;;; (the cipher state's nonce is mutated in place by CIPHER-ADVANCE-NONCE).
+
+(defun copy-symmetric (ss)
+  (make-symmetric-state :ck (copy-seq (ss-ck ss)) :h (copy-seq (ss-h ss))
+                        :cipher (copy-cipher-state (ss-cipher ss))))
+
+(defmacro %with-rollback ((hs &rest accessors) &body body)
+  "Run BODY; if it exits abnormally (any error), restore the symmetric state
+   and the slots named by ACCESSORS (hs-* accessors) to their values on entry."
+  (let ((saved-sym (gensym "SYM")) (ok (gensym "OK"))
+        (saved (loop for a in accessors collect (gensym (symbol-name a)))))
+    `(let ((,saved-sym (copy-symmetric (hs-symmetric ,hs)))
+           ,@(loop for s in saved for a in accessors collect `(,s (,a ,hs)))
+           (,ok nil))
+       (unwind-protect (multiple-value-prog1 (progn ,@body) (setf ,ok t))
+         (unless ,ok
+           (setf (hs-symmetric ,hs) ,saved-sym)
+           ,@(loop for s in saved for a in accessors collect `(setf (,a ,hs) ,s)))))))
+
+(defun ik-try-read-message-2 (hs msg)
+  "handshake.rs try_read_message_2: IK-READ-MESSAGE-2, leaving HS as it was if
+   MSG does not authenticate (the error is still signalled)."
+  (%with-rollback (hs hs-remote-ephemeral hs-remote-epoch hs-progress)
+    (ik-read-message-2 hs msg)))
+
+(defun xk-try-read-message-2 (hs msg)
+  "handshake.rs try_read_xk_message_2."
+  (%with-rollback (hs hs-remote-ephemeral hs-remote-epoch hs-progress)
+    (xk-read-message-2 hs msg)))
+
+(defun xk-try-read-message-3 (hs msg)
+  "handshake.rs try_read_xk_message_3."
+  (%with-rollback (hs hs-remote-static hs-remote-epoch hs-progress)
+    (xk-read-message-3 hs msg)))
+
 (defun handshake-hash (hs) (ss-h (hs-symmetric hs)))
 
 ;;; --- Session (session.rs) ----------------------------------------------------
