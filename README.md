@@ -126,6 +126,25 @@ last instruction-level gap on hardware that has data-dependent multiply timing.
 **Roadmap:** that intrinsic backend, and the pure-CL SSH/git transport this
 suite was built to unblock.
 
+## Noise (`natrium.noise`)
+
+The Noise IK and XK handshakes, the cipher state, the session split, and a replay
+window, generic over the DH group. The curve enters only through a `noise-suite`:
+key generation, public-key encoding and decoding, the DH, and the pre-message
+normalisation. natrium itself has no curve dependency. A suite for FIPS
+(secp256k1, with the FIPS ECDH) lives in `cl-fips`.
+
+- `make-ik-initiator` / `make-ik-responder`, and the `xk-*` family, with
+  `*-try-read-*` rollbacks that restore the handshake state exactly on a failed read.
+- `session-encrypt`, `session-decrypt`, and the `-with-aad` and replay-checked
+  variants that the FIPS link and session layers use.
+- The FIPS deviation is recorded in `src/noise.lisp`: handshake AEAD uses empty
+  associated data, where standard Noise uses the handshake hash.
+
+**There are no Noise test vectors in this repo yet.** The gate is the interop test
+in `cl-fips`, which runs against the upstream FIPS implementation in both directions.
+Standard Noise vectors for a generic suite would give this module its own gate.
+
 ## Running the tests
 
 ```sh
