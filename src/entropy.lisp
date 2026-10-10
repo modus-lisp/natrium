@@ -17,7 +17,19 @@
         (error "natrium: short read from /dev/urandom (~d of ~d bytes)" got n))
       buf)))
 
-(defparameter *os-entropy* #'read-dev-urandom
+(defun modus-hardware-entropy ()
+  "Modus on bare metal (the Pi Zero) has no /dev/urandom -- OPEN there is a Linux
+   syscall that traps -- but its image carries the board's hardware RNG as
+   CL-USER::%MODUS-HARDWARE-ENTROPY (net/hwrng-bcm2835.lisp).  That function, or
+   NIL anywhere else.  INTERN, not FIND-SYMBOL: a function baked into the modus
+   image has no CL-USER symbol until something reads its name, so FIND-SYMBOL
+   answers NIL; and only on modus, so no other Lisp gets a stray symbol."
+  #+modus
+  (let ((s (intern "%MODUS-HARDWARE-ENTROPY" "COMMON-LISP-USER")))
+    (and (fboundp s) (symbol-function s)))
+  #-modus nil)
+
+(defparameter *os-entropy* (or (modus-hardware-entropy) #'read-dev-urandom)
   "Function of one argument (N) returning a fresh N-byte u8v of OS entropy.
    THE seam a Lisp OS reimplements: modus binds this to its hardware entropy
    source.  Must return full-entropy bytes; the DRBG conditions them but cannot
