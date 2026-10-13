@@ -99,6 +99,118 @@
               (setf (aref out (+ o b)) (logand #xff (ash v (* -8 (- 7 b)))))))))
       out)))
 
+;;; --- modus: 64-bit words as PAIRS of 32-bit halves ----------------------
+;;; A u64 is not a fixnum on modus (fixnums are 63-bit), so the portable code
+;;; above makes every message word, state word and round temporary a bignum:
+;;; 43% of an Ed25519 signature was SHA-512's bignum shifts and limb lists.
+;;; Here each word is two u32 fixnums (HI, LO) -- the classic 32-bit-platform
+;;; SHA-512.  Every shift is a constant computed at macroexpansion, and the
+;;; low bits are masked BEFORE shifting left, so no intermediate exceeds 2^32
+;;; except the carry sums (< 6 * 2^32).  The portable definition above stays
+;;; the oracle; this one replaces it on modus only (last definition wins).
+#+modus
+(progn
+(defmacro %s5-hi-ror (h l n)
+  "HI half of the 64-bit rotate-right of (H,L) by constant N, 0 < N < 64."
+  (if (< n 32)
+      `(logior (ash ,h ,(- n)) (ash (logand ,l ,(1- (ash 1 n))) ,(- 32 n)))
+      (let ((m (- n 32)))
+        (if (= m 0) l
+            `(logior (ash ,l ,(- m)) (ash (logand ,h ,(1- (ash 1 m))) ,(- 32 m)))))))
+(defmacro %s5-lo-ror (h l n)
+  "LO half of the 64-bit rotate-right of (H,L) by constant N."
+  `(%s5-hi-ror ,l ,h ,n))
+(defmacro %s5-hi-shr (h l n) (declare (ignore l))
+  "HI half of the 64-bit logical shift-right of (H,L) by constant N < 32."
+  `(ash ,h ,(- n)))
+(defmacro %s5-lo-shr (h l n)
+  "LO half of the 64-bit logical shift-right of (H,L) by constant N < 32."
+  `(logior (ash ,l ,(- n)) (ash (logand ,h ,(1- (ash 1 n))) ,(- 32 n))))
+
+(defun %s5-split (v)
+  "A u64 V as (values HI LO), 32 bits each."
+  (values (ldb (byte 32 32) v) (ldb (byte 32 0) v)))
+
+(defvar *%s5-k* nil)
+(defun %s5-k ()
+  "+SHA512-K+ split once into a 160-slot (hi lo hi lo ...) vector."
+  (or *%s5-k*
+      (let ((v (make-array 160 :initial-element 0)))
+        (dotimes (i 80)
+          (multiple-value-bind (hi lo) (%s5-split (aref +sha512-k+ i))
+            (setf (aref v (* 2 i)) hi (aref v (1+ (* 2 i))) lo)))
+        (setq *%s5-k* v))))
+
+(defun %sha512-digest (msg init nbytes)
+  "SHA-512 / SHA-384 compression on 32-bit halves (modus)."
+  (let* ((ml (length msg))
+         (bitlen (* ml 8))
+         (padlen (let ((r (mod (+ ml 17) 128))) (if (zerop r) (+ ml 17) (+ ml 17 (- 128 r)))))
+         (m (make-array padlen :element-type '(unsigned-byte 8) :initial-element 0))
+         (hv (make-array 16 :initial-element 0))     ; state, (hi lo) pairs
+         (wv (make-array 160 :initial-element 0))    ; schedule, (hi lo) pairs
+         (kv (%s5-k))
+         (mask #xffffffff))
+    (dotimes (i 8)
+      (multiple-value-bind (hi lo) (%s5-split (aref init i))
+        (setf (aref hv (* 2 i)) hi (aref hv (1+ (* 2 i))) lo)))
+    (replace m msg)
+    (setf (aref m ml) #x80)
+    (dotimes (i 16)
+      (setf (aref m (- padlen 1 i)) (logand #xff (ash bitlen (* -8 i)))))
+    (loop for base from 0 below padlen by 128 do
+      (dotimes (i 32)                                ; 32 big-endian u32 halves
+        (let ((j (+ base (* i 4))))
+          (setf (aref wv i) (logior (ash (aref m j) 24) (ash (aref m (+ j 1)) 16)
+                                    (ash (aref m (+ j 2)) 8) (aref m (+ j 3))))))
+      (loop for i from 16 below 80 do
+        (let* ((ah (aref wv (* 2 (- i 15)))) (al (aref wv (1+ (* 2 (- i 15)))))
+               (bh (aref wv (* 2 (- i 2))))  (bl (aref wv (1+ (* 2 (- i 2)))))
+               (s0h (logxor (%s5-hi-ror ah al 1) (%s5-hi-ror ah al 8) (%s5-hi-shr ah al 7)))
+               (s0l (logxor (%s5-lo-ror ah al 1) (%s5-lo-ror ah al 8) (%s5-lo-shr ah al 7)))
+               (s1h (logxor (%s5-hi-ror bh bl 19) (%s5-hi-ror bh bl 61) (%s5-hi-shr bh bl 6)))
+               (s1l (logxor (%s5-lo-ror bh bl 19) (%s5-lo-ror bh bl 61) (%s5-lo-shr bh bl 6)))
+               (lo (+ (aref wv (1+ (* 2 (- i 16)))) s0l (aref wv (1+ (* 2 (- i 7)))) s1l))
+               (hi (+ (aref wv (* 2 (- i 16))) s0h (aref wv (* 2 (- i 7))) s1h (ash lo -32))))
+          (setf (aref wv (* 2 i)) (logand hi mask)
+                (aref wv (1+ (* 2 i))) (logand lo mask))))
+      (let ((ah (aref hv 0)) (al (aref hv 1)) (bh (aref hv 2)) (bl (aref hv 3))
+            (ch (aref hv 4)) (cl (aref hv 5)) (dh (aref hv 6)) (dl (aref hv 7))
+            (eh (aref hv 8)) (el (aref hv 9)) (fh (aref hv 10)) (fl (aref hv 11))
+            (gh (aref hv 12)) (gl (aref hv 13)) (hh (aref hv 14)) (hl (aref hv 15)))
+        (dotimes (i 80)
+          (let* ((bs1h (logxor (%s5-hi-ror eh el 14) (%s5-hi-ror eh el 18) (%s5-hi-ror eh el 41)))
+                 (bs1l (logxor (%s5-lo-ror eh el 14) (%s5-lo-ror eh el 18) (%s5-lo-ror eh el 41)))
+                 (chh (logxor (logand eh fh) (logand (logxor eh mask) gh)))
+                 (chl (logxor (logand el fl) (logand (logxor el mask) gl)))
+                 (t1l (+ hl bs1l chl (aref kv (1+ (* 2 i))) (aref wv (1+ (* 2 i)))))
+                 (t1h (logand (+ hh bs1h chh (aref kv (* 2 i)) (aref wv (* 2 i)) (ash t1l -32)) mask))
+                 (t1l (logand t1l mask))
+                 (bs0h (logxor (%s5-hi-ror ah al 28) (%s5-hi-ror ah al 34) (%s5-hi-ror ah al 39)))
+                 (bs0l (logxor (%s5-lo-ror ah al 28) (%s5-lo-ror ah al 34) (%s5-lo-ror ah al 39)))
+                 (majh (logxor (logand ah bh) (logand ah ch) (logand bh ch)))
+                 (majl (logxor (logand al bl) (logand al cl) (logand bl cl)))
+                 (t2l (+ bs0l majl))
+                 (t2h (+ bs0h majh (ash t2l -32)))
+                 (el2 (+ dl t1l))
+                 (al2 (+ t1l (logand t2l mask))))
+            (setq hh gh hl gl  gh fh gl fl  fh eh fl el
+                  eh (logand (+ dh t1h (ash el2 -32)) mask) el (logand el2 mask)
+                  dh ch dl cl  ch bh cl bl  bh ah bl al
+                  ah (logand (+ t1h t2h (ash al2 -32)) mask) al (logand al2 mask))))
+        (macrolet ((acc (i xh xl)
+                     `(let ((lo (+ (aref hv ,(1+ (* 2 i))) ,xl)))
+                        (setf (aref hv ,(* 2 i)) (logand (+ (aref hv ,(* 2 i)) ,xh (ash lo -32)) mask)
+                              (aref hv ,(1+ (* 2 i))) (logand lo mask)))))
+          (acc 0 ah al) (acc 1 bh bl) (acc 2 ch cl) (acc 3 dh dl)
+          (acc 4 eh el) (acc 5 fh fl) (acc 6 gh gl) (acc 7 hh hl))))
+    (let ((out (make-array nbytes :element-type '(unsigned-byte 8))))
+      (dotimes (b nbytes)
+        (let ((half (aref hv (floor b 4))) (sh (* -8 (- 3 (mod b 4)))))
+          (setf (aref out b) (logand #xff (ash half sh)))))
+      out)))
+)
+
 (defun sha512 (msg)
   "SHA-512 of byte vector MSG → fresh 64-byte big-endian digest."
   (%sha512-digest msg +sha512-init+ 64))
