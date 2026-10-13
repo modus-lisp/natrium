@@ -34,13 +34,29 @@
          (r3 (logand (ash r -78) m26)) (r4 (logand (ash r -104) m26))
          (s1 (* 5 r1)) (s2 (* 5 r2)) (s3 (* 5 r3)) (s4 (* 5 r4))
          (h0 0) (h1 0) (h2 0) (h3 0) (h4 0)
+         (pad (make-array 16 :element-type '(unsigned-byte 8) :initial-element 0))
          (len (length msg)))
     (loop for i from 0 below len by 16 do
+      ;; Limbs straight from the bytes (poly1305-donna): four overlapping
+      ;; little-endian u32 reads, shifted and masked -- all fixnum.  Decoding
+      ;; the block into one 128-bit integer first made every block a bignum
+      ;; (plus a 2^128 pad bit), which dominated the MAC on any Lisp whose
+      ;; bignums are slow.  A short final block is copied into a zeroed
+      ;; 16-byte buffer with the RFC 8439 0x01 pad byte after it, and then
+      ;; carries no 2^128 bit, exactly as donna does.
       (let* ((blen (min 16 (- len i)))
-             (n (logior (le->uint msg i blen) (ash 1 (* 8 blen)))))
-        (incf h0 (logand n m26))           (incf h1 (logand (ash n -26) m26))
-        (incf h2 (logand (ash n -52) m26)) (incf h3 (logand (ash n -78) m26))
-        (incf h4 (logand (ash n -104) m26))
+             (b (if (= blen 16) msg pad))
+             (o (if (= blen 16) i 0))
+             (hibit (if (= blen 16) #x1000000 0)))
+        (when (< blen 16)
+          (fill pad 0)
+          (replace pad msg :start2 i :end2 (+ i blen))
+          (setf (aref pad blen) 1))
+        (incf h0 (logand (u32le b o) m26))
+        (incf h1 (logand (ash (u32le b (+ o 3)) -2) m26))
+        (incf h2 (logand (ash (u32le b (+ o 6)) -4) m26))
+        (incf h3 (ash (u32le b (+ o 9)) -6))
+        (incf h4 (logior (ash (u32le b (+ o 12)) -8) hibit))
         (let ((d0 (+ (* h0 r0) (* h1 s4) (* h2 s3) (* h3 s2) (* h4 s1)))
               (d1 (+ (* h0 r1) (* h1 r0) (* h2 s4) (* h3 s3) (* h4 s2)))
               (d2 (+ (* h0 r2) (* h1 r1) (* h2 r0) (* h3 s4) (* h4 s3)))
