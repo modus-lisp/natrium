@@ -67,17 +67,50 @@
     (setf (aref out 31) (logior (aref out 31) (ash (logand (aref xbytes 0) 1) 7)))
     out))
 
+(defparameter *fe-d* (integer->fe *d25519*) "d as a field element.")
+(defparameter *fe-sqrtm1* (integer->fe *sqrtm1*) "sqrt(-1) as a field element.")
+(defparameter *fe-p58* (/ (- *p25519* 5) 8) "The (p-5)/8 exponent of RFC 8032 5.1.3.")
+
+(defun fe25519-equal-p (a b)
+  "Field equality on canonical encodings."
+  (bytes= (fe25519-tobytes a) (fe25519-tobytes b)))
+
+(defun edc-recover-x (y sign)
+  "RFC 8032 5.1.3 x-recovery in the radix-2^51 field: the x of the point with
+   field-element Y and SIGN bit (0/1), or NIL.  ED-RECOVER-X (the big-integer
+   reference) is the oracle; this is the same sequence in limbs -- the
+   reference's bignum MOD/expt dominated verification on a Lisp with slow
+   bignums."
+  (let* ((one (fe-one))
+         (y2 (fe25519-sq y))
+         (u (fe25519-sub y2 one))                          ; y^2 - 1
+         (v (fe25519-add (fe25519-mul *fe-d* y2) one))     ; d y^2 + 1
+         (v3 (fe25519-mul (fe25519-sq v) v))
+         (v7 (fe25519-mul (fe25519-sq v3) v))
+         (x (fe25519-mul (fe25519-mul u v3) (fe25519-pow (fe25519-mul u v7) *fe-p58*)))
+         (vx2 (fe25519-mul v (fe25519-sq x))))
+    (cond ((fe25519-equal-p vx2 u))
+          ((fe25519-equal-p vx2 (fe25519-sub (fe-zero) u))
+           (setf x (fe25519-mul x *fe-sqrtm1*)))
+          (t (return-from edc-recover-x nil)))
+    (let ((xb (fe25519-tobytes x)))
+      (when (and (every #'zerop xb) (= sign 1)) (return-from edc-recover-x nil))
+      (unless (= (logand (aref xb 0) 1) sign)
+        (setf x (fe25519-sub (fe-zero) x))))
+    x))
+
 (defun edc-decode (bytes)
-  "Decode 32 bytes to an fe-coordinate point, or NIL.  Verify-only (public data),
-   so x-recovery borrows the big-integer reference."
+  "Decode 32 bytes to an fe-coordinate point, or NIL.  Y must be canonical
+   (< p): checked as \"re-encoding gives the same bytes\", which needs no
+   256-bit integer.  X-recovery in limbs (EDC-RECOVER-X)."
   (declare (type u8v bytes))
-  (let ((sign (ldb (byte 1 7) (aref bytes 31)))
-        (yint (logand (le->uint bytes 0 32) (1- (ash 1 255)))))
-    (when (>= yint *p25519*) (return-from edc-decode nil))
-    (let ((x (ed-recover-x yint sign)))
+  (let* ((sign (ldb (byte 1 7) (aref bytes 31)))
+         (ybytes (let ((b (copy-seq bytes))) (setf (aref b 31) (logand (aref b 31) #x7f)) b))
+         (y (fe25519-frombytes ybytes)))
+    (unless (bytes= (fe25519-tobytes y) ybytes) (return-from edc-decode nil))
+    (let ((x (edc-recover-x y sign)))
       (when (null x) (return-from edc-decode nil))
-      (ept (integer->fe x) (integer->fe yint) (fe-one)
-           (integer->fe (mod (* x yint) *p25519*))))))
+      (ept x y (fe-one) (fe25519-mul x y)))))
 
 (defun edc-point-equal (p q)
   "Projective equality via cross-multiplied, frozen coordinates."
