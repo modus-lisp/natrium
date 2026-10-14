@@ -105,7 +105,11 @@
    256-bit integer.  X-recovery in limbs (EDC-RECOVER-X)."
   (declare (type u8v bytes))
   (let* ((sign (ldb (byte 1 7) (aref bytes 31)))
-         (ybytes (let ((b (copy-seq bytes))) (setf (aref b 31) (logand (aref b 31) #x7f)) b))
+         ;; MAKE-U8V + REPLACE rather than COPY-SEQ: on modus before 0635389
+         ;; COPY-SEQ of a byte vector returned a generic vector, and BYTES=
+         ;; (which declares U8V) then read it as bytes and rejected every key.
+         (ybytes (let ((b (replace (make-u8v 32) bytes)))
+                   (setf (aref b 31) (logand (aref b 31) #x7f)) b))
          (y (fe25519-frombytes ybytes)))
     (unless (bytes= (fe25519-tobytes y) ybytes) (return-from edc-decode nil))
     (let ((x (edc-recover-x y sign)))

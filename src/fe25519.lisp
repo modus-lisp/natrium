@@ -97,9 +97,11 @@
     (dotimes (i 5) (setf (aref h i) (* 121665 (aref f i))))
     (fe25519-carry h)))
 
-#+modus
+#+modus-mul-split
 (progn
 ;;; --- modus: limb products as FIXNUM PAIRS --------------------------------
+;;; Gated on :MODUS-MUL-SPLIT, not :MODUS: a modus without the intrinsic does
+;;; not push that feature and keeps the portable definitions above.
 ;;; On modus a 52x56-bit limb product is a heap bignum through CL `*' (~3.8 us
 ;;; against SBCL's ~0.03 for the same expression).  %MUL-SPLIT-LO / -HI are a
 ;;; modus compiler intrinsic: one signed 64x64->128 multiply, returning bits
