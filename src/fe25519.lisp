@@ -47,14 +47,18 @@
 ;;; --- add / sub -----------------------------------------------------------
 (defun fe25519-add (f g)
   "Limb-wise add (result limbs < 2^52; caller keeps inputs reduced)."
+  (declare (type fe f g))
   (let ((h (fe-zero)))
+    (declare (type fe h))
     (dotimes (i 5 h) (setf (aref h i) (+ (aref f i) (aref g i))))))
 
 ;; 2*p in limb form: [2^52-38, 2^52-2, 2^52-2, 2^52-2, 2^52-2].  Adding this
 ;; before subtracting keeps every limb positive without a branch.
 (defun fe25519-sub (f g)
   "Constant-time F - G mod p (inputs must be reduced, < 2^51)."
+  (declare (type fe f g))
   (let ((h (fe-zero)))
+    (declare (type fe h))
     (setf (aref h 0) (- (+ (aref f 0) #xfffffffffffda) (aref g 0)))
     (loop for i from 1 below 5 do
       (setf (aref h i) (- (+ (aref f i) #xffffffffffffe) (aref g i))))
@@ -64,6 +68,7 @@
 (defun fe25519-carry (h)
   "Reduce H's limbs to < 2^51 (one full carry chain + a short second pass),
    folding the 2^255 = 19 wrap.  Returns H (mutated)."
+  (declare (type fe h))
   (macrolet ((step1 (i j) `(let ((c (ash (aref h ,i) -51)))
                              (setf (aref h ,i) (logand (aref h ,i) +fe-mask+))
                              (incf (aref h ,j) c))))
@@ -133,6 +138,7 @@
 
 (defun fe25519-mul (f g)
   "Constant-time F * G mod p (modus: fixnum-pair limb products)."
+  (declare (type fe f g))
   (let ((f0 (aref f 0)) (f1 (aref f 1)) (f2 (aref f 2)) (f3 (aref f 3)) (f4 (aref f 4))
         (g0 (aref g 0)) (g1 (aref g 1)) (g2 (aref g 2)) (g3 (aref g 3)) (g4 (aref g 4))
         (l0 0) (l1 0) (l2 0) (l3 0) (l4 0)
@@ -151,6 +157,7 @@
       (%fe-mac l4 h4 f0 g4) (%fe-mac l4 h4 f1 g3) (%fe-mac l4 h4 f2 g2)
       (%fe-mac l4 h4 f3 g1) (%fe-mac l4 h4 f4 g0))
     (let ((h (fe-zero)))
+      (declare (type fe h))
       (setf (aref h 0) (+ l0 (* 19 (logand h4 +fe-mask+)))
             (aref h 1) (+ l1 h0 (* 19 (ash h4 -51)))
             (aref h 2) (+ l2 h1)
@@ -160,8 +167,10 @@
 
 (defun fe25519-mul121666 (f)
   "F * 121665 mod p (modus: each limb product split at 51, so no bignum)."
+  (declare (type fe f))
   (let ((f0 (aref f 0)) (f1 (aref f 1)) (f2 (aref f 2)) (f3 (aref f 3)) (f4 (aref f 4))
         (h (fe-zero)))
+    (declare (type fe h))
     (%fe-weak-carry f0 f1 f2 f3 f4)
     ;; limb < 2^52, x 121665 < 2^17: LO < 2^51, HI < 2^18
     (setf (aref h 0) (+ (%mul-split-lo f0 121665 51) (* 19 (%mul-split-hi f4 121665 51)))
@@ -188,6 +197,7 @@
 
 (defun fe25519-cmov (bit f g)
   "If BIT (0/1) is 1, copy G's limbs into F; branch-free.  Mutates F."
+  (declare (type fe f g))
   (let ((mask (- (logand bit 1))))              ; 0 or all-ones
     (dotimes (i 5)
       (setf (aref f i) (logxor (aref f i) (logand mask (logxor (aref f i) (aref g i))))))))
@@ -195,6 +205,7 @@
 ;;; --- constant-time swap + freeze/serialize -------------------------------
 (defun fe25519-cswap (swap f g)
   "If SWAP (0/1) is 1, exchange the limbs of F and G; branch-free.  Mutates."
+  (declare (type fe f g))
   (let ((mask (- (logand swap 1))))            ; 0 or all-ones
     (dotimes (i 5)
       (let ((tmp (logand mask (logxor (aref f i) (aref g i)))))
