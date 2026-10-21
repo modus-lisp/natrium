@@ -15,12 +15,7 @@
     (dotimes (i block-size)
       (setf (aref ipad i) (logxor (aref k0 i) #x36)
             (aref opad i) (logxor (aref k0 i) #x5c)))
-    (funcall hash-fn
-             (concatenate '(simple-array (unsigned-byte 8) (*))
-                          opad
-                          (funcall hash-fn
-                                   (concatenate '(simple-array (unsigned-byte 8) (*))
-                                                ipad msg))))))
+    (funcall hash-fn (u8cat opad (funcall hash-fn (u8cat ipad msg))))))
 
 (defun hmac-sha256 (key msg)
   "HMAC-SHA256 of MSG under KEY → fresh 32-byte digest."

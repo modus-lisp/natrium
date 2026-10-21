@@ -33,26 +33,35 @@
      (setf vc (logand #xffffffff (+ vc vd))  vb (rotl32 (logxor vb vc) 7))
      (setf (aref ,st ,a) va (aref ,st ,b) vb (aref ,st ,c) vc (aref ,st ,d) vd)))
 
+(defun %chacha20-keystream (st w ks)
+  "20 rounds over initial state ST (16 u32 words) in the scratch array W, add
+   the original state, and serialize little-endian into the 64-byte KS.
+   Returns KS.  The callers keep W and KS across the blocks of a message."
+  (dotimes (i 16) (setf (aref w i) (aref st i)))
+  (dotimes (i 10)                                        ; 20 rounds = 10x2
+    (%qr w 0 4  8 12) (%qr w 1 5  9 13) (%qr w 2 6 10 14) (%qr w 3 7 11 15)
+    (%qr w 0 5 10 15) (%qr w 1 6 11 12) (%qr w 2 7  8 13) (%qr w 3 4  9 14))
+  (dotimes (i 16 ks)
+    (let ((v (logand #xffffffff (+ (aref w i) (aref st i)))) (o (* 4 i)))
+      (setf (aref ks o)       (logand #xff v)
+            (aref ks (+ o 1)) (logand #xff (ash v -8))
+            (aref ks (+ o 2)) (logand #xff (ash v -16))
+            (aref ks (+ o 3)) (logand #xff (ash v -24))))))
+
+(defun %chacha20-scratch ()
+  ;; A simple-vector, not (unsigned-byte 32): the words are fixnums on every
+  ;; 64-bit Lisp, and on modus a store into a specialized array is a call.
+  (make-array 16 :initial-element 0))
+
 (defun %chacha20-serialize (st)
-  "20 rounds over initial state ST (16 u32 words), add the original state, and
-   serialize little-endian to a fresh 64-byte block."
-  (let ((w (copy-seq st)))
-    (dotimes (i 10)                                        ; 20 rounds = 10x2
-      (%qr w 0 4  8 12) (%qr w 1 5  9 13) (%qr w 2 6 10 14) (%qr w 3 7 11 15)
-      (%qr w 0 5 10 15) (%qr w 1 6 11 12) (%qr w 2 7  8 13) (%qr w 3 4  9 14))
-    (let ((out (make-u8v 64)))
-      (dotimes (i 16 out)
-        (let ((v (logand #xffffffff (+ (aref w i) (aref st i)))) (o (* 4 i)))
-          (setf (aref out o)       (logand #xff v)
-                (aref out (+ o 1)) (logand #xff (ash v -8))
-                (aref out (+ o 2)) (logand #xff (ash v -16))
-                (aref out (+ o 3)) (logand #xff (ash v -24))))))))
+  "The keystream block of state ST as a fresh 64-byte vector."
+  (%chacha20-keystream st (%chacha20-scratch) (make-u8v 64)))
 
 (defun %chacha20-state (key)
   "Fresh 16-word state with the constants and 256-bit KEY filled in (words
    12-15 left zero for the caller to set per variant)."
   (declare (type u8v key))
-  (let ((st (make-array 16 :element-type '(unsigned-byte 32) :initial-element 0)))
+  (let ((st (%chacha20-scratch)))
     (setf (aref st 0) #x61707865 (aref st 1) #x3320646e   ; "expand 32-byte k"
           (aref st 2) #x79622d32 (aref st 3) #x6b206574)
     (dotimes (i 8 st) (setf (aref st (+ 4 i)) (u32le key (* 4 i))))))
@@ -79,9 +88,13 @@
     ;; would reuse keystream) on an absurdly long (>256 GiB) message
     (when (>= (+ counter (ceiling len 64)) (ash 1 32))
       (error "chacha20: 32-bit block counter would wrap (message too long)"))
-    (loop for blk from 0
-          for base from 0 below len by 64 do
-      (let ((ks (chacha20-block key (+ counter blk) nonce)))
+    ;; One state for the whole message: only the counter word changes.
+    (let ((st (%chacha20-state key)) (w (%chacha20-scratch)) (ks (make-u8v 64)))
+      (dotimes (i 3) (setf (aref st (+ 13 i)) (u32le nonce (* 4 i))))
+      (loop for blk from 0
+            for base from 0 below len by 64 do
+        (setf (aref st 12) (logand #xffffffff (+ counter blk)))
+        (%chacha20-keystream st w ks)
         (loop for i from base below (min len (+ base 64)) do
           (setf (aref out i) (logxor (aref data i) (aref ks (- i base)))))))
     out))
@@ -107,9 +120,15 @@
   (declare (type u8v key nonce data))
   (let* ((len (length data))
          (out (make-u8v len)))
-    (loop for blk from 0
-          for base from 0 below len by 64 do
-      (let ((ks (chacha20-original-block key (+ counter blk) nonce)))
+    (let ((st (%chacha20-state key)) (w (%chacha20-scratch)) (ks (make-u8v 64)))
+      (setf (aref st 14) (u32le nonce 0)
+            (aref st 15) (u32le nonce 4))
+      (loop for blk from 0
+            for base from 0 below len by 64 do
+        (let ((c (+ counter blk)))
+          (setf (aref st 12) (logand #xffffffff c)
+                (aref st 13) (logand #xffffffff (ash c -32))))
+        (%chacha20-keystream st w ks)
         (loop for i from base below (min len (+ base 64)) do
           (setf (aref out i) (logxor (aref data i) (aref ks (- i base)))))))
     out))

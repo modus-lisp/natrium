@@ -15,7 +15,14 @@
 
 (defun u8cat (&rest parts)
   "Concatenate byte sequences into a fresh u8v."
-  (apply #'concatenate '(simple-array (unsigned-byte 8) (*)) parts))
+  ;; MAKE-U8V + REPLACE rather than CONCATENATE: CONCATENATE with an array type
+  ;; specifier works the type out on every call, which on modus was most of
+  ;; the time of an HMAC over a short message.
+  (let ((out (make-u8v (loop for p in parts sum (length p))))
+        (at 0))
+    (dolist (p parts out)
+      (replace out p :start1 at)
+      (incf at (length p)))))
 
 (defun le->uint (bytes off len)
   "Decode LEN little-endian bytes of BYTES at OFF into a non-negative integer."
