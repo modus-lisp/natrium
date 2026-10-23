@@ -45,16 +45,22 @@
     (gossamer:with-fixed-scratch ((a :octets 32))
       (check "pool reuses buffers" (eq a seen))))
   ;; OWN: a dropped owner's buffers come back to the pool, wiped (SBCL: finalizers)
-  ;; The owner is made in a separate, not-inlined function so no stack slot here can
-  ;; keep it alive (SBCL scans the stack conservatively), and the collection is
-  ;; retried a few times rather than trusting one GC to run the finalizer.
+  ;; OWN is a SAFETY NET, not the contract (explicit wipe/free is): SBCL never
+  ;; promises to finalize a given object, and on arm64 it keeps a dead one alive
+  ;; far more often (2 of 11 finalized there, measured, against 11 of 11 on
+  ;; x86-64).  So abandon twenty owners, made in a not-inlined function so no
+  ;; stack slot here holds them, and require that the net catches SOME.
   #+sbcl
   (let ((before (nth-value 1 (gossamer:pool-stats))))
-    (abandon-an-owner)
-    (loop repeat 5
+    (dotimes (i 20) (abandon-an-owner))
+    ;; newer SBCLs run finalizers on their own thread: give it up to 5 seconds
+    (loop repeat 50
           until (> (nth-value 1 (gossamer:pool-stats)) before)
-          do (sb-ext:gc :full t) (sb-impl::run-pending-finalizers) (sleep 0.1))
-    (check "an abandoned owner's buffer returns to the pool"
+          do (sb-ext:gc :full t)
+             (let ((run (find-symbol "RUN-PENDING-FINALIZERS" "SB-IMPL")))
+               (when (and run (fboundp run)) (funcall run)))
+             (sleep 0.1))
+    (check "abandoned owners' buffers return to the pool"
            (> (nth-value 1 (gossamer:pool-stats)) before)))
   (let* ((o (list :owner)) (b (gossamer:acquire :octets 40))
          (free0 (nth-value 1 (gossamer:pool-stats))))
