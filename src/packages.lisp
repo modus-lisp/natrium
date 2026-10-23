@@ -20,17 +20,26 @@
   (:export
    ;; hashing
    #:sha256 #:sha384 #:sha512
+   #:sha256-into #:sha384-into #:sha512-into
+   #:with-sha256 #:with-sha384 #:with-sha512 #:sha256-update #:sha512-update
+   #:sha256-final-into #:sha512-final-into
    #:hmac #:hmac-sha256 #:hmac-sha384 #:hmac-sha512
+   #:hmac-into #:hmac-sha256-into #:hmac-sha384-into #:hmac-sha512-into
    ;; key derivation
-   #:hkdf #:hkdf-extract #:hkdf-expand #:hkdf-sha256 #:hkdf-sha384 #:hkdf-sha512
+   #:pbkdf2-into
+   #:hkdf #:hkdf-into #:hkdf-expand-into #:hkdf-extract #:hkdf-expand #:hkdf-sha256 #:hkdf-sha384 #:hkdf-sha512
    ;; entropy + CSPRNG
-   #:*os-entropy* #:os-entropy #:random-bytes
-   #:drbg-instantiate #:drbg-generate #:drbg-reseed
+   #:*os-entropy* #:os-entropy #:random-bytes #:random-bytes-into
+   #:drbg-instantiate #:drbg-generate #:drbg-generate-into #:drbg-reseed
    ;; stream cipher + AEAD
    #:chacha20 #:chacha20-block
    #:chacha20-original #:chacha20-original-block
    #:poly1305-mac #:poly1305-key-gen
    #:chacha20-poly1305-encrypt #:chacha20-poly1305-decrypt
+   ;; AES (constant-time, bit-sliced S-box)
+   #:aes-key #:aes-key-p #:make-aes-key #:aes-key-wipe #:with-aes-key
+   #:aes-encrypt-block #:aes-decrypt-block
+   #:aes-cbc-encrypt #:aes-cbc-decrypt-into #:aes-ctr-xor-into
    ;; X25519 key agreement
    #:x25519 #:x25519-base #:x25519-keypair
    ;; Ed25519 signatures

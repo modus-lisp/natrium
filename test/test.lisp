@@ -107,6 +107,46 @@
     (check "sha384 abc" (n:sha384 (n:ascii->bytes "abc"))
            "cb00753f45a35e8bb5a03d699ac65007272c32ab0eded1631a8b605a43ff5bed8086072ba1e7cc2358baeca134c825a7")
 
+;; ---- AES (FIPS 197 appendix C; SP 800-38A F.2.1 CBC and F.5.1 CTR) ----
+    (let ((pt (hex->bytes "00112233445566778899aabbccddeeff")))
+      (loop for (key ct) in '(("000102030405060708090a0b0c0d0e0f" "69c4e0d86a7b0430d8cdb78070b4c55a")
+                              ("000102030405060708090a0b0c0d0e0f1011121314151617" "dda97ca4864cdfe06eaf70a0ec0d7191")
+                              ("000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f" "8ea2b7ca516745bfeafc49904b496089"))
+            do (n:with-aes-key (k (gossamer:pooled-copy (hex->bytes key)))
+                 (let ((c (n:aes-encrypt-block k pt (n:make-u8v 16))))
+                   (check (format nil "aes-~d encrypt (FIPS 197 C)" (* 4 (length key))) c ct)
+                   (check (format nil "aes-~d decrypt (FIPS 197 C)" (* 4 (length key)))
+                          (n:aes-decrypt-block k c (n:make-u8v 16)) "00112233445566778899aabbccddeeff")))))
+    (let ((pt (hex->bytes "6bc1bee22e409f96e93d7e117393172aae2d8a571e03ac9c9eb76fac45af8e5130c81c46a35ce411e5fbc1191a0a52eff69f2445df4f9b17ad2b417be66c3710")))
+      (n:with-aes-key (k (gossamer:pooled-copy (hex->bytes "2b7e151628aed2a6abf7158809cf4f3c")))
+        (let ((ct (n:aes-cbc-encrypt k (hex->bytes "000102030405060708090a0b0c0d0e0f") pt)))
+          (check "aes-128-cbc encrypt (SP 800-38A F.2.1)" ct
+                 "7649abac8119b246cee98e9b12e9197d5086cb9b507219ee95db113a917678b273bed6b8e3c1743b7116e69e222295163ff1caa1681fac09120eca307586e1a7")
+          (check "aes-128-cbc decrypt (SP 800-38A F.2.2)"
+                 (n:aes-cbc-decrypt-into k (hex->bytes "000102030405060708090a0b0c0d0e0f") ct (n:make-u8v 64))
+                 (bytes->hex pt)))
+        (check "aes-128-ctr (SP 800-38A F.5.1)"
+               (n:aes-ctr-xor-into k (hex->bytes "f0f1f2f3f4f5f6f7f8f9fafbfcfdfeff") pt (n:make-u8v 64))
+               "874d6191b620e3261bef6864990db6ce9806f66b7970fdff8617187bb9fffdff5ae4df3edbd5d35e5b4f09020db03eab1e031dda2fbe03d1792170a0f3009cee")))
+    (incf *count*)
+    (if (handler-case (progn (n:make-aes-key (hex->bytes "000102030405060708090a0b0c0d0e0f")) nil)
+          (gossamer:not-fixed () t))
+        (format t "  ok    aes refuses a key on the moving heap~%")
+        (progn (incf *fails*) (format t "  FAIL  aes accepted a heap key~%")))
+
+    ;; ---- PBKDF2-HMAC-SHA256 (RFC 7914 11 and the common RFC 6070-style vectors) ----
+    (flet ((pb (pw salt c len)
+             (let ((k (gossamer:pooled-copy (n:ascii->bytes pw))) (out (n:make-u8v len)))
+               (unwind-protect (n:pbkdf2-into :sha256 k (n:ascii->bytes salt) c out) (gossamer:free k)))))
+      (check "pbkdf2-sha256 password/salt c=1" (pb "password" "salt" 1 32)
+             "120fb6cffcf8b32c43e7225256c4f837a86548c92ccc35480805987cb70be17b")
+      (check "pbkdf2-sha256 password/salt c=2" (pb "password" "salt" 2 32)
+             "ae4d0c95af6b46d32d0adff928f06dd02a303f8ef3c251dfd6e2d85a95474c43")
+      (check "pbkdf2-sha256 password/salt c=4096" (pb "password" "salt" 4096 32)
+             "c5e478d59288c841aa530db6845c4c8d962893a001ce4e11a4963873aa98134a")
+      (check "pbkdf2-sha256 passwd/salt c=1 dk=64 (RFC 7914)" (pb "passwd" "salt" 1 64)
+             "55ac046e56e3089fec1691c22544b605f94185216dde0465e68b9d57c20dacbc49ca9cccf179b645991664b39d77ef317c71b845b1e30bd509112041d3a19783"))
+
     ;; ---- HMAC-SHA256 (RFC 4231) ----
     (check "hmac-sha256 rfc4231-1"
            (n:hmac-sha256 (rep-byte #x0b 20) (n:ascii->bytes "Hi There"))
@@ -378,4 +418,6 @@
     (format t "~%~d/~d passed~%" (- *count* *fails*) *count*)
     (when (plusp *fails*)
       (error "natrium: ~d test vector(s) failed" *fails*))
+    (format t "~&~%gossamer (secret memory)~%")
+    (unless (gossamer.tests:run) (error "natrium: gossamer checks failed"))
     t))

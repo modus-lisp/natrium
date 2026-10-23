@@ -1,5 +1,14 @@
 ;;;; natrium.asd
 
+(defsystem "natrium/gossamer"
+  :description "Memory the collector never moves, for secrets: fixed buffers, a pool of
+                scratch, CHECK-FIXED, WIPE.  SBCL static vectors; on modus a locked,
+                undumpable mmap arena.  Package GOSSAMER.  Dependency-free, and
+                loadable on its own."
+  :author "ynniv"
+  :license "MIT"
+  :components ((:module "src" :components ((:file "gossamer")))))
+
 (defsystem "natrium"
   :description "A dependency-free, portable Common Lisp implementation of the
                 modern constant-time crypto suite (the NaCl/libsodium primitive
@@ -12,7 +21,7 @@
   :version "0.1.0"
   :author "ynniv"
   :license "MIT"
-  :depends-on ()
+  :depends-on ("natrium/gossamer")   ; secrets in non-moving memory, wiped on exit
   :serial t
   :components
   ((:module "src"
@@ -23,11 +32,13 @@
                  (:file "sha512")
                  (:file "hmac")
                  (:file "hkdf")
+                 (:file "pbkdf2")
                  (:file "entropy")
                  (:file "drbg")
                  (:file "chacha20")
                  (:file "poly1305")
                  (:file "aead")
+                 (:file "aes")
                  (:file "x25519")
                  (:file "fe25519")
                  (:file "x25519-ct")
@@ -42,5 +53,5 @@
                 SHA-512 and RFC 4231 HMAC-SHA256 / HMAC-SHA512."
   :depends-on ("natrium")
   :serial t
-  :components ((:module "test" :components ((:file "test"))))
+  :components ((:module "test" :components ((:file "gossamer-test") (:file "test"))))
   :perform (test-op (o c) (uiop:symbol-call '#:natrium.test '#:run-all)))

@@ -57,9 +57,16 @@
 (defstruct noise-suite
   "The DH group a Noise handshake runs over.  Keys are opaque to this module:
    GENERATE returns a key pair, PUBLIC-BYTES its wire form, DECODE a point
-   from wire bytes (or NIL if invalid), DH (key point) a 32-byte shared
-   secret, and PREMESSAGE the byte form of a static key mixed in as a
-   pre-message.  IK-NAME and XK-NAME are the full protocol names."
+   from wire bytes (or NIL if invalid), DH (key point out) writes the 32-byte
+   shared secret into OUT (a fixed buffer: it is a secret), WIPE (key) destroys a
+   key pair this module made (an ephemeral), and PREMESSAGE the byte form of a
+   static key mixed in as a pre-message.  IK-NAME and XK-NAME are the full
+   protocol names.
+
+   SECRETS: the chaining key and every cipher key are pooled FIXED buffers owned
+   by their state objects (FIXED:OWN), so an abandoned handshake still returns them
+   to the pool, wiped; DH outputs exist only in fixed scratch; the ephemeral key
+   is wiped when the handshake becomes a session."
   name
   ik-name
   xk-name
@@ -67,7 +74,8 @@
   generate        ; () -> key
   public-bytes    ; key -> wire bytes
   decode          ; wire bytes -> point, or NIL
-  dh              ; (key point) -> 32 bytes
+  dh              ; (key point out) -> writes 32 bytes into OUT
+  (wipe nil)      ; key -> destroy it (optional)
   premessage)     ; wire bytes -> pre-message bytes
 
 (defun ik-msg1-size (suite)
@@ -111,9 +119,22 @@
 
 ;;; --- CipherState (mod.rs) ---------------------------------------------------
 
-(defstruct (cipher-state (:constructor make-cipher-state (&optional key)))
-  key            ; 32-byte key, or NIL before the first mix_key
+(defstruct (cipher-state (:constructor %make-cipher-state (key nonce)))
+  key            ; owned pooled fixed 32-byte key, or NIL before the first mix_key
   (nonce 0))
+
+(defun make-cipher-state (&optional key (start 0))
+  "A cipher state holding a pooled fixed copy of KEY[START,START+32) (or no key)."
+  (if key
+      (let ((b (gossamer:pooled-copy key :start start :end (+ start 32))))
+        (gossamer:own (%make-cipher-state b 0) b))
+      (%make-cipher-state nil 0)))
+
+(defun copy-cipher (cs)
+  "A deep copy: its own pooled key buffer, the same nonce."
+  (let ((c (make-cipher-state (cipher-state-key cs))))
+    (setf (cipher-state-nonce c) (cipher-state-nonce cs))
+    c))
 
 (defun counter-nonce (counter)
   "mod.rs counter_to_nonce: 4 zero bytes then the 64-bit counter little-endian."
@@ -162,27 +183,43 @@
 ;;; --- SymmetricState (handshake.rs) ------------------------------------------
 
 (defstruct (symmetric-state (:conc-name ss-))
-  ck h (cipher (make-cipher-state)))
+  ck              ; owned pooled fixed 32 bytes (secret)
+  h               ; the transcript hash (public)
+  (cipher (make-cipher-state)))
+
+(defun %make-symmetric (ck-source h cipher)
+  (let* ((ck (gossamer:pooled-copy ck-source))
+         (ss (make-symmetric-state :ck ck :h h :cipher cipher)))
+    (gossamer:own ss ck)))
 
 (defun symmetric-initialize (protocol-name)
   (let* ((name (ascii-bytes protocol-name))
          (h (if (<= (length name) 32)
                 (let ((v (u8 32))) (replace v name) v)
                 (n:sha256 name))))
-    (make-symmetric-state :ck (copy-seq h) :h h)))
+    (%make-symmetric h h (make-cipher-state))))
 
 (defun mix-hash (ss data)
   (setf (ss-h ss) (n:sha256 (u8-concat (ss-h ss) data))))
 
-(defun hkdf2 (ck ikm)
-  "HKDF-SHA256(salt = CK, IKM, info = empty) -> two 32-byte outputs."
-  (let ((out (n:hkdf-sha256 ck ikm (u8 0) 64)))
-    (values (u8-subseq out 0 32) (u8-subseq out 32 64))))
+(defparameter +empty+ (u8 0))
 
 (defun mix-key (ss ikm)
-  (multiple-value-bind (ck k) (hkdf2 (ss-ck ss) ikm)
-    (setf (ss-ck ss) ck
-          (ss-cipher ss) (make-cipher-state k))))
+  "HKDF-SHA256(salt = ck, IKM, info = empty) -> ck', k; in fixed scratch, written
+into the state's own buffers."
+  (gossamer:with-fixed-scratch ((out :octets 64))
+    (n:hkdf-into :sha256 (ss-ck ss) ikm +empty+ out)
+    (replace (ss-ck ss) out :end2 32)
+    (let ((cs (ss-cipher ss)))
+      (if (cipher-state-key cs)
+          (progn (replace (cipher-state-key cs) out :start2 32) (setf (cipher-state-nonce cs) 0))
+          (setf (ss-cipher ss) (make-cipher-state out 32))))))
+
+(defun mix-dh (hs key point)
+  "mix_key over the DH of KEY and POINT, the shared secret held only in fixed scratch."
+  (gossamer:with-fixed-scratch ((shared :octets 32))
+    (funcall (noise-suite-dh (hs-suite hs)) key point shared)
+    (mix-key (hs-symmetric hs) shared)))
 
 (defun encrypt-and-hash (ss plaintext)
   (let ((ct (cipher-encrypt (ss-cipher ss) plaintext)))
@@ -195,8 +232,9 @@
     pt))
 
 (defun symmetric-split (ss)
-  (multiple-value-bind (k1 k2) (hkdf2 (ss-ck ss) (u8 0))
-    (values (make-cipher-state k1) (make-cipher-state k2))))
+  (gossamer:with-fixed-scratch ((out :octets 64))
+    (n:hkdf-into :sha256 (ss-ck ss) +empty+ +empty+ out)
+    (values (make-cipher-state out 0) (make-cipher-state out 32))))
 
 ;;; --- HandshakeState ----------------------------------------------------------
 
@@ -222,8 +260,10 @@
   (or (funcall (noise-suite-decode (hs-suite hs)) bytes)
       (noise-fail "invalid public key")))
 
-(defun hs-dh (hs key point)
-  (funcall (noise-suite-dh (hs-suite hs)) key point))
+(defun hs-wipe-ephemeral (hs)
+  (let ((w (noise-suite-wipe (hs-suite hs))) (e (hs-ephemeral hs)))
+    (when (and w e) (funcall w e))
+    (setf (hs-ephemeral hs) nil)))
 
 (defun hs-generate (hs)
   (funcall (noise-suite-generate (hs-suite hs))))
@@ -276,9 +316,9 @@
          (e (setf (hs-ephemeral hs) (or ephemeral (hs-generate hs))))
          (e-pub (hs-public-bytes hs e)))
     (mix-hash sym e-pub)                                              ; -> e
-    (mix-key sym (hs-dh hs e (hs-remote-static hs)))                  ; -> es
+    (mix-dh hs e (hs-remote-static hs))                  ; -> es
     (let ((enc-s (encrypt-and-hash sym (hs-public-bytes hs (hs-static hs))))) ; -> s
-      (mix-key sym (hs-dh hs (hs-static hs) (hs-remote-static hs)))   ; -> ss
+      (mix-dh hs (hs-static hs) (hs-remote-static hs))   ; -> ss
       (let ((enc-epoch (encrypt-and-hash sym (hs-local-epoch hs))))   ; -> epoch
         (setf (hs-progress hs) :message1-done)
         (u8-concat e-pub enc-s enc-epoch)))))
@@ -294,11 +334,11 @@
          (s-end (+ pk pk +aead-tag-size+)))
     (setf (hs-remote-ephemeral hs) re)
     (mix-hash sym e-bytes)                                            ; -> e
-    (mix-key sym (hs-dh hs (hs-static hs) re))                        ; -> es
+    (mix-dh hs (hs-static hs) re)                        ; -> es
     (let* ((s-bytes (decrypt-and-hash sym (u8-subseq msg pk s-end)))  ; -> s
            (rs (hs-decode hs s-bytes)))
       (setf (hs-remote-static hs) rs)
-      (mix-key sym (hs-dh hs (hs-static hs) rs))                      ; -> ss
+      (mix-dh hs (hs-static hs) rs)                      ; -> ss
       (setf (hs-remote-epoch hs) (decrypt-and-hash sym (u8-subseq msg s-end))) ; -> epoch
       (setf (hs-progress hs) :message1-done)
       hs)))
@@ -311,8 +351,8 @@
          (e (setf (hs-ephemeral hs) (or ephemeral (hs-generate hs))))
          (e-pub (hs-public-bytes hs e)))
     (mix-hash sym e-pub)                                              ; <- e
-    (mix-key sym (hs-dh hs e re))                                     ; <- ee
-    (mix-key sym (hs-dh hs (hs-static hs) re))                        ; <- se
+    (mix-dh hs e re)                                     ; <- ee
+    (mix-dh hs (hs-static hs) re)                        ; <- se
     (let ((enc-epoch (encrypt-and-hash sym (hs-local-epoch hs))))     ; <- epoch
       (setf (hs-progress hs) :complete)
       (u8-concat e-pub enc-epoch))))
@@ -327,8 +367,8 @@
          (re (hs-decode hs e-bytes)))
     (setf (hs-remote-ephemeral hs) re)
     (mix-hash sym e-bytes)                                            ; <- e
-    (mix-key sym (hs-dh hs (hs-ephemeral hs) re))                     ; <- ee
-    (mix-key sym (hs-dh hs (hs-ephemeral hs) (hs-remote-static hs)))  ; <- se
+    (mix-dh hs (hs-ephemeral hs) re)                     ; <- ee
+    (mix-dh hs (hs-ephemeral hs) (hs-remote-static hs))  ; <- se
     (setf (hs-remote-epoch hs) (decrypt-and-hash sym (u8-subseq msg pk))) ; <- epoch
     (setf (hs-progress hs) :complete)
     hs))
@@ -342,7 +382,7 @@
          (e (setf (hs-ephemeral hs) (or ephemeral (hs-generate hs))))
          (e-pub (hs-public-bytes hs e)))
     (mix-hash sym e-pub)                                              ; -> e
-    (mix-key sym (hs-dh hs e (hs-remote-static hs)))                  ; -> es
+    (mix-dh hs e (hs-remote-static hs))                  ; -> es
     (setf (hs-progress hs) :message1-done)
     e-pub))
 
@@ -355,7 +395,7 @@
          (re (hs-decode hs e-bytes)))
     (setf (hs-remote-ephemeral hs) re)
     (mix-hash sym e-bytes)                                            ; -> e
-    (mix-key sym (hs-dh hs (hs-static hs) re))                        ; -> es
+    (mix-dh hs (hs-static hs) re)                        ; -> es
     (setf (hs-progress hs) :message1-done)
     hs))
 
@@ -367,7 +407,7 @@
          (e (setf (hs-ephemeral hs) (or ephemeral (hs-generate hs))))
          (e-pub (hs-public-bytes hs e)))
     (mix-hash sym e-pub)                                              ; <- e
-    (mix-key sym (hs-dh hs e re))                                     ; <- ee
+    (mix-dh hs e re)                                     ; <- ee
     (let ((enc-epoch (encrypt-and-hash sym (hs-local-epoch hs))))     ; <- epoch
       (setf (hs-progress hs) :message2-done)
       (u8-concat e-pub enc-epoch))))
@@ -382,7 +422,7 @@
          (re (hs-decode hs e-bytes)))
     (setf (hs-remote-ephemeral hs) re)
     (mix-hash sym e-bytes)                                            ; <- e
-    (mix-key sym (hs-dh hs (hs-ephemeral hs) re))                     ; <- ee
+    (mix-dh hs (hs-ephemeral hs) re)                     ; <- ee
     (setf (hs-remote-epoch hs) (decrypt-and-hash sym (u8-subseq msg pk))) ; <- epoch
     (setf (hs-progress hs) :message2-done)
     hs))
@@ -392,7 +432,7 @@
   (check-state hs :initiator :message2-done :xk)
   (let* ((sym (hs-symmetric hs))
          (enc-s (encrypt-and-hash sym (hs-public-bytes hs (hs-static hs))))) ; -> s
-    (mix-key sym (hs-dh hs (hs-static hs) (hs-remote-ephemeral hs)))  ; -> se
+    (mix-dh hs (hs-static hs) (hs-remote-ephemeral hs))  ; -> se
     (let ((enc-epoch (encrypt-and-hash sym (hs-local-epoch hs))))      ; -> epoch
       (setf (hs-progress hs) :complete)
       (u8-concat enc-s enc-epoch))))
@@ -406,7 +446,7 @@
          (s-bytes (decrypt-and-hash sym (u8-subseq msg 0 s-end)))     ; -> s
          (rs (hs-decode hs s-bytes)))
     (setf (hs-remote-static hs) rs)
-    (mix-key sym (hs-dh hs (hs-ephemeral hs) rs))                     ; -> se
+    (mix-dh hs (hs-ephemeral hs) rs)                     ; -> se
     (setf (hs-remote-epoch hs) (decrypt-and-hash sym (u8-subseq msg s-end))) ; -> epoch
     (setf (hs-progress hs) :complete)
     hs))
@@ -430,8 +470,9 @@
 ;;; (the cipher state's nonce is mutated in place by CIPHER-ADVANCE-NONCE).
 
 (defun copy-symmetric (ss)
-  (make-symmetric-state :ck (copy-seq (ss-ck ss)) :h (copy-seq (ss-h ss))
-                        :cipher (copy-cipher-state (ss-cipher ss))))
+  "A deep copy (its own pooled ck and cipher key); a discarded copy returns them to
+the pool through FIXED:OWN."
+  (%make-symmetric (ss-ck ss) (copy-seq (ss-h ss)) (copy-cipher (ss-cipher ss))))
 
 (defmacro %with-rollback ((hs &rest accessors) &body body)
   "Run BODY; if it exits abnormally (any error), restore the symmetric state
@@ -535,6 +576,8 @@
   "handshake.rs into_session: split, then initiator sends c1 / responder c2."
   (unless (eq (hs-progress hs) :complete) (noise-fail "handshake not complete"))
   (multiple-value-bind (c1 c2) (symmetric-split (hs-symmetric hs))
+    (hs-wipe-ephemeral hs)                            ; the ephemeral has done its job
+    (gossamer:wipe (ss-ck (hs-symmetric hs)))           ; and so has the chaining key
     (multiple-value-bind (send recv)
         (if (eq (hs-role hs) :initiator) (values c1 c2) (values c2 c1))
       (make-noise-session :role (hs-role hs) :send send :recv recv
