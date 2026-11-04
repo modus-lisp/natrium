@@ -30,6 +30,7 @@
                  (:file "util")
                  (:file "sha256")
                  (:file "sha512")
+                 (:file "digests")
                  (:file "hmac")
                  (:file "hkdf")
                  (:file "pbkdf2")

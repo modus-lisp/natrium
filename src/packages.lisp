@@ -19,6 +19,7 @@
     (widening multiply / add-with-carry) that lowers the portable limb multiply.")
   (:export
    ;; hashing
+   #:sha1 #:ripemd160 #:hash160 #:sha3-256
    #:sha256 #:sha384 #:sha512
    #:sha256-into #:sha384-into #:sha512-into
    #:with-sha256 #:with-sha384 #:with-sha512 #:sha256-update #:sha512-update
