@@ -83,8 +83,14 @@ fixed memory, or for tests).  Never true in production on the secret path.")
   (defun %baked (name)
     "A function baked into the modus image, or NIL.  Syscalls are issued through one:
 an intrinsic SYSCALL in runtime-compiled code does not return the kernel's answer."
-    (let ((s (intern name "COMMON-LISP-USER")))
-      (and (fboundp s) (symbol-function s))))
+    ;; MODUS-INT first: since the 2026-10-29 package split the kernel's internals
+    ;; live there, and CL-USER only reaches what MODUS exports.  Looking in
+    ;; CL-USER alone found nothing on a current image, so the arena never opened
+    ;; and every fixed allocation failed.  CL-USER stays the fallback for older
+    ;; images.
+    (dolist (pkg '("MODUS-INT" "COMMON-LISP-USER"))
+      (let ((s (and (find-package pkg) (intern name pkg))))
+        (when (and s (fboundp s)) (return (symbol-function s))))))
 
   (defun %syscall (n a b c d)
     (funcall (or (%baked "%GC-SAFE-BLOCK-6") (error "gossamer: this modus image has no syscall path"))

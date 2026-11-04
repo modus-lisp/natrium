@@ -25,8 +25,11 @@
    image has no CL-USER symbol until something reads its name, so FIND-SYMBOL
    answers NIL; and only on modus, so no other Lisp gets a stray symbol."
   #+modus
-  (let ((s (intern "%MODUS-HARDWARE-ENTROPY" "COMMON-LISP-USER")))
-    (and (fboundp s) (symbol-function s)))
+  ;; MODUS-INT first (the kernel's home since the package split), CL-USER for
+  ;; older images.
+  (dolist (pkg '("MODUS-INT" "COMMON-LISP-USER"))
+    (let ((s (and (find-package pkg) (intern "%MODUS-HARDWARE-ENTROPY" pkg))))
+      (when (and s (fboundp s)) (return (symbol-function s)))))
   #-modus nil)
 
 (defparameter *os-entropy* (or (modus-hardware-entropy) #'read-dev-urandom)
