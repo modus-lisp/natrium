@@ -116,6 +116,12 @@
 (let ((reg (find-symbol "REGISTER-PER-COMPUTATION-SPECIAL" "COMMON-LISP-USER")))
   (when (and reg (fboundp reg)) (funcall reg '*default-drbg*)))
 
+;;; A SAVED CORE MUST NOT CARRY THE DRBG.  Its state is a secret, and every process
+;;; restored from the core would go on from the same state -- the same "random" bytes
+;;; on every boot of a card.  A restored image seeds a new one when it first asks.
+#+modus
+(gossamer::%on-restore (lambda () (setf *default-drbg* nil)))
+
 (defun ensure-default-drbg ()
   (or *default-drbg*
       (setf *default-drbg*

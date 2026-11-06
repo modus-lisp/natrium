@@ -15,9 +15,16 @@
 ;;;;          :OCTETS are u8 vectors; :FIXNUMS are general vectors holding only fixnums
 ;;;;          (immediates: the collector never needs to see them).  :UB64 is refused --
 ;;;;          on modus a value past the fixnum range is a heap bignum, and a pointer
-;;;;          stored in the arena would dangle.  Bare metal has no backend yet:
-;;;;          FIXED-BACKEND is :NONE there and CHECK-FIXED signals unless
-;;;;          *ALLOW-UNFIXED* -- secret code fails loudly rather than pretending.
+;;;;          stored in the arena would dangle.
+;;;;   modus  (bare metal) the same arena, its chunks taken from the board's STATIC
+;;;;          REGION (modus %STATIC-ALLOC: RAM the memory map gives no collector, zeroed
+;;;;          when handed out).  No swap and no core dump to keep secrets out of.
+;;;;          An image without a static region has no backend: FIXED-BACKEND is :NONE
+;;;;          and CHECK-FIXED signals unless *ALLOW-UNFIXED* -- secret code fails loudly
+;;;;          rather than pretending.
+;;;;   Either arena belongs to ONE process (one boot): a saved core does not carry it.
+;;;;   A restored image starts a fresh one (MODUS:ADD-RESTORE-HOOK), so a secret made
+;;;;   before SAVE-IMAGE is gone after it -- make keys after the restore.
 ;;;;
 ;;;; SBCL'S STATIC SPACE IS SMALL AND NEVER RECLAIMED: 1 MB on a stock build, about
 ;;;; 21,800 32-byte vectors, and a static vector that becomes garbage is still there.
@@ -79,13 +86,16 @@ fixed memory, or for tests).  Never true in production on the secret path.")
   (defconstant +arena-chunk+ (* 1024 1024))
   (defconstant +ctl-size+ 8192)
   (defvar *ctl* 0 "Raw address of the arena's control page; 0 when there is no arena.")
+  (defvar *arena-source* nil "Where the arena's chunks come from: :MMAP, :STATIC or NIL.")
 
   (defun %baked (name)
     "A function baked into the modus image, or NIL.  Syscalls are issued through one:
 an intrinsic SYSCALL in runtime-compiled code does not return the kernel's answer.
 A board image names its kernel functions from CL-USER; the hosted CLI keeps them in
-MODUS-INT, and looking only in CL-USER left a hosted image with no arena at all."
-    (dolist (pkg '("COMMON-LISP-USER" "MODUS-INT"))
+MODUS-INT, and looking only in CL-USER left a hosted image with no arena at all.  A
+board image's runtime functions are not fbound in CL-USER; the few meant for libraries
+are bound in MODUS (%STATIC-ALLOC among them)."
+    (dolist (pkg '("COMMON-LISP-USER" "MODUS-INT" "MODUS"))
       (let ((s (and (find-package pkg) (find-symbol name pkg))))
         (when (and s (fboundp s)) (return (symbol-function s))))))
 
@@ -101,6 +111,20 @@ MODUS-INT, and looking only in CL-USER left a hosted image with no arena at all.
                  ((or (search "aarch64" m) (search "arm64" m)) '(222 228 233))))))
 
   (defun %arena-available-p () (/= *ctl* 0))
+
+  (defconstant +static-chunk+ (* 256 1024)
+    "A bare-metal arena chunk: the static region is a few MB for everything that must
+not move, so it is taken a little at a time.")
+
+  (defun %static-chunk (size)
+    "Raw address of SIZE zeroed bytes of the board's static region, or NIL."
+    (let ((f (%baked "%STATIC-ALLOC")))
+      (and f (let ((a (funcall f size))) (and (integerp a) (> a 0) a)))))
+
+  (defun %on-restore (fn)
+    "Run FN after this image is saved and restored (modus's restore hooks), if it can."
+    (let ((add (find-symbol "ADD-RESTORE-HOOK" "MODUS")))
+      (when (and add (fboundp add)) (funcall add fn))))
 
   (defmacro %ctl (off) `(mem-ref (+ *ctl* ,off) :u64))
 
@@ -119,8 +143,11 @@ a forked child.  Returns the raw address."
         raw)))
 
   (defun %arena-init ()
-    (when (and (zerop *ctl*) (%arena-numbers) (%baked "%GC-SAFE-BLOCK-6"))
-      (setf *ctl* (%mmap-secret +ctl-size+))))
+    (when (zerop *ctl*)
+      (cond ((and (%arena-numbers) (%baked "%GC-SAFE-BLOCK-6"))
+             (setf *ctl* (%mmap-secret +ctl-size+) *arena-source* :mmap))
+            (t (let ((raw (%static-chunk +ctl-size+)))
+                 (when raw (setf *ctl* raw *arena-source* :static)))))))
 
   (defun %arena-lock ()
     (let ((a *ctl*))
@@ -134,9 +161,13 @@ a forked child.  Returns the raw address."
     `(progn (%arena-lock) (unwind-protect (progn ,@body) (%arena-unlock))))
 
   (defun %arena-grow (bytes)
-    "Map another chunk and make it the bump region.  Lock held."
-    (let* ((size (* +arena-chunk+ (ceiling bytes +arena-chunk+)))
-           (raw (%mmap-secret size))
+    "Map (or, on a board, take) another chunk and make it the bump region.  Lock held."
+    (let* ((chunk (if (eq *arena-source* :mmap) +arena-chunk+ +static-chunk+))
+           (size (* chunk (ceiling bytes chunk)))
+           (raw (if (eq *arena-source* :mmap)
+                    (%mmap-secret size)
+                    (or (%static-chunk size)
+                        (error "gossamer: the static region has no room for another ~d bytes" size))))
            (i (%ctl 40)))
       (when (>= i 64) (error "gossamer: the secret arena has run out of range slots"))
       (setf (%ctl (+ 48 (* 16 i))) raw
@@ -209,7 +240,9 @@ link), then the elements.  Lock held."
              (when (and (<= (%ctl (+ 48 (* 16 i))) w) (< w (%ctl (+ 56 (* 16 i)))))
                (return t))))))
 
-  (%arena-init))
+  (%arena-init)
+  ;; a restored image has none of the saved one's arena: start another
+  (%on-restore (lambda () (setf *ctl* 0) (%arena-init))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Allocation (long-lived: keys, pool slabs).
