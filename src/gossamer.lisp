@@ -82,9 +82,12 @@ fixed memory, or for tests).  Never true in production on the secret path.")
 
   (defun %baked (name)
     "A function baked into the modus image, or NIL.  Syscalls are issued through one:
-an intrinsic SYSCALL in runtime-compiled code does not return the kernel's answer."
-    (let ((s (intern name "COMMON-LISP-USER")))
-      (and (fboundp s) (symbol-function s))))
+an intrinsic SYSCALL in runtime-compiled code does not return the kernel's answer.
+A board image names its kernel functions from CL-USER; the hosted CLI keeps them in
+MODUS-INT, and looking only in CL-USER left a hosted image with no arena at all."
+    (dolist (pkg '("COMMON-LISP-USER" "MODUS-INT"))
+      (let ((s (and (find-package pkg) (find-symbol name pkg))))
+        (when (and s (fboundp s)) (return (symbol-function s))))))
 
   (defun %syscall (n a b c d)
     (funcall (or (%baked "%GC-SAFE-BLOCK-6") (error "gossamer: this modus image has no syscall path"))
