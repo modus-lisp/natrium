@@ -21,11 +21,6 @@
      #x19a4c116 #x1e376c08 #x2748774c #x34b0bcb5 #x391c0cb3 #x4ed8aa4a #x5b9cca4f #x682e6ff3
      #x748f82ee #x78a5636f #x84c87814 #x8cc70208 #x90befffa #xa4506ceb #xbef9a3f7 #xc67178f2)))
 
-(declaim (inline ror32 shr32))
-(defun ror32 (x n) (declare (type u32 x) (type (integer 0 31) n))
-  (logand #xffffffff (logior (ash x (- n)) (ash x (- 32 n)))))
-(defun shr32 (x n) (declare (type u32 x)) (ash x (- n)))
-
 ;;; --- streaming -----------------------------------------------------------
 ;;; A context is three fixed buffers from the FIXED pool -- the state H, the message
 ;;; schedule W and the block buffer -- so hashing a secret leaves nothing on the moving
@@ -52,38 +47,46 @@
        (let ((,ctx (sha256-init (%make-sha256-ctx ,h ,w ,b))))
          ,@body))))
 
+(defmacro %u32+ (&rest xs) `(ldb (byte 32 0) (+ ,@xs)))
+(defmacro %rotr32 (x n) `(logior (ash ,x ,(- n)) (ldb (byte 32 0) (ash ,x ,(- 32 n)))))
+
+;;; The compression function in beacon's shape (src/hash.lisp there), which was the
+;;; fastest of the org's five on SBCL: 75 MB/s against 35 for the one it replaced.
+;;; Every intermediate is declared u32 and the sums wrap with LDB, so SBCL keeps it all
+;;; in machine words.  H and W stay natrium's fixed-pool fixnum vectors.
 (defun %sha256-block (h w data off)
   "Compress the 64-byte block DATA[OFF, OFF+64) into H, using W as the schedule."
   (declare (type (simple-array fixnum (8)) h) (type (simple-array fixnum (64)) w)
-           (type (simple-array (unsigned-byte 8) (*)) data) (type fixnum off))
-  (dotimes (i 16)
-    (let ((j (+ off (* i 4))))
-      (setf (aref w i) (logior (ash (aref data j) 24) (ash (aref data (+ j 1)) 16)
-                               (ash (aref data (+ j 2)) 8) (aref data (+ j 3))))))
-  (loop for i from 16 below 64 do
-    (let ((s0 (logxor (ror32 (aref w (- i 15)) 7) (ror32 (aref w (- i 15)) 18) (shr32 (aref w (- i 15)) 3)))
-          (s1 (logxor (ror32 (aref w (- i 2)) 17) (ror32 (aref w (- i 2)) 19) (shr32 (aref w (- i 2)) 10))))
-      (setf (aref w i) (logand #xffffffff (+ (aref w (- i 16)) s0 (aref w (- i 7)) s1)))))
-  (let ((a (aref h 0)) (b (aref h 1)) (c (aref h 2)) (d (aref h 3))
-        (e (aref h 4)) (f (aref h 5)) (g (aref h 6)) (hh (aref h 7)))
-    (declare (type u32 a b c d e f g hh))
-    (dotimes (i 64)
-      (let* ((bs1 (logxor (ror32 e 6) (ror32 e 11) (ror32 e 25)))
-             (ch (logxor (logand e f) (logand (logxor e #xffffffff) g)))
-             (t1 (logand #xffffffff (+ hh bs1 ch (aref +sha256-k+ i) (aref w i))))
-             (bs0 (logxor (ror32 a 2) (ror32 a 13) (ror32 a 22)))
-             (maj (logxor (logand a b) (logand a c) (logand b c)))
-             (t2 (logand #xffffffff (+ bs0 maj))))
-        (setf hh g  g f  f e  e (logand #xffffffff (+ d t1))
-              d c  c b  b a  a (logand #xffffffff (+ t1 t2)))))
-    (setf (aref h 0) (logand #xffffffff (+ (aref h 0) a))
-          (aref h 1) (logand #xffffffff (+ (aref h 1) b))
-          (aref h 2) (logand #xffffffff (+ (aref h 2) c))
-          (aref h 3) (logand #xffffffff (+ (aref h 3) d))
-          (aref h 4) (logand #xffffffff (+ (aref h 4) e))
-          (aref h 5) (logand #xffffffff (+ (aref h 5) f))
-          (aref h 6) (logand #xffffffff (+ (aref h 6) g))
-          (aref h 7) (logand #xffffffff (+ (aref h 7) hh))))
+           (type (simple-array (unsigned-byte 8) (*)) data) (type fixnum off)
+           (optimize (speed 3) (safety 0) (debug 0)))
+  (let ((k +sha256-k+))
+    (dotimes (i 16)
+      (let ((j (+ off (* 4 i))))
+        (declare (type fixnum j))
+        (setf (aref w i) (logior (ash (aref data j) 24) (ash (aref data (+ j 1)) 16)
+                                 (ash (aref data (+ j 2)) 8) (aref data (+ j 3))))))
+    (loop for i of-type fixnum from 16 below 64 do
+      (let* ((w15 (aref w (- i 15))) (w2 (aref w (- i 2)))
+             (s0 (logxor (%rotr32 w15 7) (%rotr32 w15 18) (ash w15 -3)))
+             (s1 (logxor (%rotr32 w2 17) (%rotr32 w2 19) (ash w2 -10)))
+             (w16 (aref w (- i 16))) (w7 (aref w (- i 7))))
+        (declare (type u32 w15 w2 s0 s1 w16 w7))
+        (setf (aref w i) (%u32+ w16 s0 w7 s1))))
+    (let ((a (aref h 0)) (b (aref h 1)) (c (aref h 2)) (d (aref h 3))
+          (e (aref h 4)) (f (aref h 5)) (g (aref h 6)) (hh (aref h 7)))
+      (declare (type u32 a b c d e f g hh))
+      (dotimes (i 64)
+        (let* ((wi (aref w i))
+               (s1 (logxor (%rotr32 e 6) (%rotr32 e 11) (%rotr32 e 25)))
+               (ch (logxor (logand e f) (logand (logxor e #xffffffff) g)))
+               (t1 (%u32+ hh s1 ch (aref k i) wi))
+               (s0 (logxor (%rotr32 a 2) (%rotr32 a 13) (%rotr32 a 22)))
+               (maj (logxor (logand a b) (logand a c) (logand b c)))
+               (t2 (%u32+ s0 maj)))
+          (declare (type u32 wi s1 ch t1 s0 maj t2))
+          (setf hh g g f f e e (%u32+ d t1) d c c b b a a (%u32+ t1 t2))))
+      (macrolet ((acc (i v) `(setf (aref h ,i) (%u32+ (the u32 (aref h ,i)) ,v))))
+        (acc 0 a) (acc 1 b) (acc 2 c) (acc 3 d) (acc 4 e) (acc 5 f) (acc 6 g) (acc 7 hh))))
   nil)
 
 (defun sha256-update (ctx data &key (start 0) end)

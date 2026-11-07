@@ -31,6 +31,21 @@
              ("sha3 448"    natrium:sha3-256 "abcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnopq" "41c0dba2a9d6240849100376a8235e2c82e1b9998a999e21db32dd97496d3376")))
   (destructuring-bind (name fn msg want) v (check name (hex (funcall fn (bytes msg))) want)))
 (check "sha1 1M a"  (hex (natrium:sha1 *million-a*)) "34aa973cd4c4daa4f61eeb2bdbad27316534016f")
+;; streaming: the same million a's fed in uneven pieces that straddle block edges,
+;; and a range of a NON-simple vector (copied, so START/END must be re-based)
+(check "sha1 1M a streamed"
+       (hex (let ((s (natrium:sha1-init)) (i 0))
+              (loop for n in '(1 63 64 65 127 1000 4095) do
+                (natrium:sha1-update s *million-a* i (+ i n)) (incf i n))
+              (natrium:sha1-update s *million-a* i)
+              (natrium:sha1-final s)))
+       "34aa973cd4c4daa4f61eeb2bdbad27316534016f")
+(check "sha1 range of an adjustable vector"
+       (hex (let ((v (make-array 10 :element-type '(unsigned-byte 8) :adjustable t
+                                    :initial-contents (bytes "xxabcxxxxx")))
+                  (s (natrium:sha1-init)))
+              (natrium:sha1-update s v 2 5) (natrium:sha1-final s)))
+       "a9993e364706816aba3e25717850c26c9cd0d89d")
 (check "rmd 1M a"   (hex (natrium:ripemd160 *million-a*)) "52783243c1697bdbe16d37f97f68f08325dc1528")
 (check "sha3 1M a"  (hex (natrium:sha3-256 *million-a*)) "5c8875ae474a3634ba4fd55ec85bffd661f32aca75c6d699d0cdcb6c115891c1")
 (check "hash160"    (hex (natrium:hash160 (bytes "abc"))) "bb1be98c142444d7a56aa3981c3942a978e4dc33")
