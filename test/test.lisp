@@ -91,6 +91,17 @@
     (check "sha256 448bit" (n:sha256 (n:ascii->bytes
                                       "abcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnopq"))
            "248d6a61d20638b8e5c026930c3e6039a33ce45964ff2167f6ecedd419db06c1")
+    ;; a heap context reused from a midstate: compress a 64-byte prefix once, copy per message
+    (let* ((prefix (n:sha256 (n:ascii->bytes "BIP0340/challenge")))
+           (mid (n:make-sha256-state))
+           (msg (n:ascii->bytes "abcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnopq")))
+      (n:sha256-update mid prefix) (n:sha256-update mid prefix)
+      (dotimes (k 2)                                   ; twice: the copy must not consume MID
+        (let ((c (n:sha256-copy-state mid (n:make-sha256-state))))
+          (n:sha256-update c msg)
+          (check (format nil "sha256 midstate copy ~d" k)
+                 (n:sha256-final-into c (make-array 32 :element-type '(unsigned-byte 8)))
+                 (bytes->hex (n:sha256 (concatenate '(simple-array (unsigned-byte 8) (*)) prefix prefix msg)))))))
 
     ;; ---- SHA-512 (FIPS 180-4) ----
     (check "sha512 empty"  (n:sha512 (n:ascii->bytes ""))

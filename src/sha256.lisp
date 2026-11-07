@@ -57,6 +57,24 @@
 ;;; fastest of the org's five on SBCL: 75 MB/s against 35 for the one it replaced.
 ;;; Every intermediate is declared u32 and the sums wrap with LDB, so SBCL keeps it all
 ;;; in machine words.  H and W stay natrium's fixed-pool fixnum vectors.
+;;; A context on the ordinary heap, for PUBLIC data that is hashed often enough for its
+;;; allocation to matter, or whose state is reused: a relay's BIP340 challenge hash starts
+;;; with the same 64-byte block for every event, so that block is compressed once and the
+;;; state copied per event.  Secrets go through WITH-SHA256 instead.
+(defun make-sha256-state ()
+  "A fresh SHA-256 context on the heap, initialised.  For public data only."
+  (sha256-init (%make-sha256-ctx (make-array 8 :element-type 'fixnum :initial-element 0)
+                                 (make-array 64 :element-type 'fixnum :initial-element 0)
+                                 (make-array 64 :element-type '(unsigned-byte 8) :initial-element 0))))
+
+(defun sha256-copy-state (from to)
+  "Make TO continue from FROM's state (a midstate), and return TO."
+  (replace (sha256-ctx-h to) (sha256-ctx-h from))
+  (replace (sha256-ctx-buf to) (sha256-ctx-buf from))
+  (setf (sha256-ctx-buflen to) (sha256-ctx-buflen from)
+        (sha256-ctx-total to) (sha256-ctx-total from))
+  to)
+
 (defun %sha256-block (h w data off)
   "Compress the 64-byte block DATA[OFF, OFF+64) into H, using W as the schedule."
   (declare (type (simple-array fixnum (8)) h) (type (simple-array fixnum (64)) w)
