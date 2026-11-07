@@ -44,11 +44,16 @@
 ;;; The unmasked shift in %SHA1-ROL32 may make a bignum on Modus before the LOGAND; the
 ;;; answer is right either way, only slower there.
 
+;;; On SBCL a 32-bit rotate is one ROL through its sb-rotate-byte contrib (part of SBCL,
+;;; no foreign code); the portable shift-and-or is six instructions there.
+#+sbcl (eval-when (:compile-toplevel :load-toplevel :execute) (require :sb-rotate-byte))
+
 (declaim (inline %sha1-rol32))
 (defun %sha1-rol32 (x n)
   (declare (type (unsigned-byte 32) x) (type (integer 0 31) n)
            (optimize (speed 3) (safety 0)))
-  (logand #xffffffff (logior (ash x n) (ash x (- n 32)))))
+  #+sbcl (sb-rotate-byte:rotate-byte n (byte 32 0) x)
+  #-sbcl (logand #xffffffff (logior (ash x n) (ash x (- n 32)))))
 
 (deftype %sha1-h () '(simple-array (unsigned-byte 32) (5)))
 (deftype %sha1-w () '(simple-array (unsigned-byte 32) (80)))
@@ -65,17 +70,30 @@
   (loop for i of-type fixnum from 16 below 80 do
     (setf (aref w i) (%sha1-rol32 (logxor (aref w (- i 3)) (aref w (- i 8))
                                           (aref w (- i 14)) (aref w (- i 16))) 1)))
+  ;; Fully unrolled: round I's five working variables are the previous round's under
+  ;; rotated NAMES, so the expansion moves nothing.  The per-round choice of F and K is
+  ;; made at macroexpansion time.  SBCL: 109 MB/s for a loop choosing F/K per round,
+  ;; ~180 unrolled with ROL.  (ironclad's 364 is x86-64 assembly, not Lisp.)
   (let ((a (aref h 0)) (b (aref h 1)) (c (aref h 2)) (d (aref h 3)) (e (aref h 4)))
     (declare (type (unsigned-byte 32) a b c d e))
-    (dotimes (i 80)
-      (multiple-value-bind (f k)
-          (cond ((< i 20) (values (logior (logand b c) (logand (logxor b #xffffffff) d)) #x5a827999))
-                ((< i 40) (values (logxor b c d) #x6ed9eba1))
-                ((< i 60) (values (logior (logand b c) (logand b d) (logand c d)) #x8f1bbcdc))
-                (t (values (logxor b c d) #xca62c1d6)))
-        (declare (type (unsigned-byte 32) f k))
-        (let ((tmp (logand #xffffffff (+ (%sha1-rol32 a 5) f e k (aref w i)))))
-          (setf e d  d c  c (%sha1-rol32 b 30)  b a  a tmp))))
+    (macrolet ((all-rounds ()
+                 (let ((vars (list 'a 'b 'c 'd 'e)) (forms '()))
+                   (dotimes (i 80)
+                     (destructuring-bind (va vb vc vd ve) vars
+                       (let ((f (cond ((< i 20) `(logxor ,vd (logand ,vb (logxor ,vc ,vd))))   ; = (b&c)|(~b&d)
+                                      ((< i 40) `(logxor ,vb ,vc ,vd))
+                                      ((< i 60) `(logior (logand ,vb ,vc) (logand ,vb ,vd) (logand ,vc ,vd)))
+                                      (t `(logxor ,vb ,vc ,vd))))
+                             (k (cond ((< i 20) #x5a827999) ((< i 40) #x6ed9eba1)
+                                      ((< i 60) #x8f1bbcdc) (t #xca62c1d6))))
+                         ;; new A goes into E's variable; B becomes rol30(B) in place
+                         (push `(setf ,ve (logand #xffffffff (+ (%sha1-rol32 ,va 5) ,f ,ve ,k (aref w ,i)))
+                                      ,vb (%sha1-rol32 ,vb 30))
+                               forms)
+                         (setf vars (list ve va vb vc vd)))))
+                   ;; after 80 rounds (a multiple of 5) the names are back where they began
+                   `(progn ,@(nreverse forms)))))
+      (all-rounds))
     (setf (aref h 0) (logand #xffffffff (+ (aref h 0) a))
           (aref h 1) (logand #xffffffff (+ (aref h 1) b))
           (aref h 2) (logand #xffffffff (+ (aref h 2) c))

@@ -48,7 +48,10 @@
          ,@body))))
 
 (defmacro %u32+ (&rest xs) `(ldb (byte 32 0) (+ ,@xs)))
-(defmacro %rotr32 (x n) `(logior (ash ,x ,(- n)) (ldb (byte 32 0) (ash ,x ,(- 32 n)))))
+#+sbcl (eval-when (:compile-toplevel :load-toplevel :execute) (require :sb-rotate-byte))
+(defmacro %rotr32 (x n)
+  #+sbcl `(sb-rotate-byte:rotate-byte ,(- 32 n) (byte 32 0) ,x)        ; one ROL on SBCL
+  #-sbcl `(logior (ash ,x ,(- n)) (ldb (byte 32 0) (ash ,x ,(- 32 n)))))
 
 ;;; The compression function in beacon's shape (src/hash.lisp there), which was the
 ;;; fastest of the org's five on SBCL: 75 MB/s against 35 for the one it replaced.
