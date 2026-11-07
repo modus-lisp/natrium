@@ -19,12 +19,13 @@
     (widening multiply / add-with-carry) that lowers the portable limb multiply.")
   (:export
    ;; hashing
-   #:sha1 #:sha1-init #:sha1-update #:sha1-final #:ripemd160 #:hash160 #:sha3-256
+   #:sha1 #:sha1-init #:sha1-update #:sha1-final #:sha1-copy-state #:md5 #:ripemd160 #:hash160
+   #:sha3-256 #:shake256 #:make-sha3-256-state #:make-shake256-state #:sha3-update #:sha3-final #:sha3-copy-state
    #:sha256 #:sha384 #:sha512
    #:sha256-into #:sha384-into #:sha512-into
    #:with-sha256 #:with-sha384 #:with-sha512 #:sha256-update #:sha512-update
    #:sha256-final-into #:sha512-final-into #:make-sha256-state #:sha256-copy-state
-   #:hmac #:hmac-sha256 #:hmac-sha384 #:hmac-sha512
+   #:hmac #:hmac-sha1 #:hmac-sha256 #:hmac-sha384 #:hmac-sha512
    #:hmac-into #:hmac-sha256-into #:hmac-sha384-into #:hmac-sha512-into
    ;; key derivation
    #:pbkdf2-into
@@ -41,6 +42,7 @@
    #:aes-key #:aes-key-p #:make-aes-key #:aes-key-wipe #:with-aes-key
    #:aes-encrypt-block #:aes-decrypt-block
    #:aes-cbc-encrypt #:aes-cbc-decrypt-into #:aes-ctr-xor-into
+   #:aes-stream #:make-aes-ctr-stream #:make-aes-cfb-stream #:aes-stream-xor #:aes-stream-wipe
    ;; X25519 key agreement
    #:x25519 #:x25519-base #:x25519-keypair
    ;; Ed25519 signatures

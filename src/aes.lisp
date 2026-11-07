@@ -335,3 +335,65 @@ OUT at OUT-START.  Encryption and decryption are the same operation.  Returns OU
                      do (setf (aref ctr i) (logand (1+ (aref ctr i)) #xFF))
                         (unless (zerop (aref ctr i)) (return))))))
   out)
+
+;;; ---------------------------------------------------------------------------
+;;; Running streams: CTR and CFB-128 whose position carries across calls.
+;;; ---------------------------------------------------------------------------
+;;; A protocol that encrypts a stream in pieces of any size -- Tor's relay cells (CTR),
+;;; frp's connection (CFB, as Go's crypto/cipher does it: full-block feedback, a
+;;; partial block continuing on the next call) -- keeps one of these per direction.
+;;; The register and the unused keystream are secret, so they are fixed buffers owned
+;;; by the stream; AES-STREAM-WIPE returns them (and leaves the key to its owner).
+
+(defstruct (aes-stream (:constructor %make-aes-stream (key mode reg ks)))
+  key mode reg ks (pos 16 :type (integer 0 16)))
+
+(defun %make-stream (k mode iv)
+  (let ((reg (gossamer:acquire :octets 16)) (ks (gossamer:acquire :octets 16)))
+    (replace reg iv :end2 16)
+    (let ((st (%make-aes-stream k mode reg ks)))
+      (gossamer:own st reg ks)
+      st)))
+
+(defun make-aes-ctr-stream (k iv)
+  "A CTR stream under the AES-KEY K from the 16-byte initial counter IV (a 128-bit
+   big-endian integer, incremented per block)."
+  (%make-stream k :ctr iv))
+
+(defun make-aes-cfb-stream (k iv direction)
+  "A CFB-128 stream under the AES-KEY K from the 16-byte IV; DIRECTION is :ENCRYPT or
+   :DECRYPT."
+  (%make-stream k (ecase direction (:encrypt :cfb-enc) (:decrypt :cfb-dec)) iv))
+
+(defun aes-stream-xor (st in &key (start 0) (end (length in)) (out in) (out-start start))
+  "Run IN[START, END) through the stream ST into OUT at OUT-START (by default in place),
+   continuing from wherever the previous call stopped.  Returns OUT."
+  (let ((k (aes-stream-key st)) (reg (aes-stream-reg st)) (ks (aes-stream-ks st))
+        (mode (aes-stream-mode st)) (pos (aes-stream-pos st)))
+    (%with-aes-scratch (w s tmp)
+      (loop for i from start below end
+            for o from out-start
+            do (when (= pos 16)                      ; next block of keystream
+                 (replace s reg) (%aes-encrypt! k s w tmp) (replace ks s) (setf pos 0)
+                 (when (eq mode :ctr)
+                   (loop for j from 15 downto 0
+                         do (setf (aref reg j) (logand (1+ (aref reg j)) #xff))
+                            (unless (zerop (aref reg j)) (return)))))
+               (let* ((x (aref in i)) (y (logxor x (aref ks pos))))
+                 ;; CFB feeds the CIPHERTEXT back: the output when encrypting, the input
+                 ;; when decrypting.  Read X before writing, so IN may be OUT.
+                 (case mode
+                   (:cfb-enc (setf (aref reg pos) y))
+                   (:cfb-dec (setf (aref reg pos) x)))
+                 (setf (aref out o) y)
+                 (incf pos))))
+    (setf (aes-stream-pos st) pos)
+    out))
+
+(defun aes-stream-wipe (st)
+  "Wipe ST's register and keystream and return them to the pool."
+  (when (aes-stream-reg st)
+    (gossamer:disown st)
+    (gossamer:free (aes-stream-reg st)) (gossamer:free (aes-stream-ks st))
+    (setf (aes-stream-reg st) nil (aes-stream-ks st) nil))
+  st)

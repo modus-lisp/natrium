@@ -11,7 +11,7 @@
 
 (defun %hash-spec (kind)
   "(values block-size digest-size) for KIND."
-  (ecase kind (:sha256 (values 64 32)) (:sha384 (values 128 48)) (:sha512 (values 128 64))))
+  (ecase kind (:sha1 (values 64 20)) (:sha256 (values 64 32)) (:sha384 (values 128 48)) (:sha512 (values 128 64))))
 
 (defmacro %with-hash ((ctx kind) &body body)
   "Bind CTX to a fresh context for KIND (:sha256 :sha384 :sha512) and run BODY."
@@ -19,15 +19,21 @@
     `(let ((,k ,kind))
        (flet ((,f (,ctx) ,@body))
          (ecase ,k
+           ;; SHA-1's state is on the heap (it is for legacy protocols: TURN, STUN, frp)
+           (:sha1 (,f (sha1-init)))
            (:sha256 (with-sha256 (c) (,f c)))
            (:sha384 (with-sha384 (c) (,f c)))
            (:sha512 (with-sha512 (c) (,f c))))))))
 
 (defun %hash-update (ctx data &optional end)
-  (if (sha256-ctx-p ctx) (sha256-update ctx data :end end) (sha512-update ctx data :end end)))
+  (cond ((sha256-ctx-p ctx) (sha256-update ctx data :end end))
+        ((sha1-state-p ctx) (sha1-update ctx data 0 (or end (length data))))
+        (t (sha512-update ctx data :end end))))
 
 (defun %hash-final-into (ctx out start)
-  (if (sha256-ctx-p ctx) (sha256-final-into ctx out :start start) (sha512-final-into ctx out :start start)))
+  (cond ((sha256-ctx-p ctx) (sha256-final-into ctx out :start start))
+        ((sha1-state-p ctx) (replace out (sha1-final ctx) :start1 start))
+        (t (sha512-final-into ctx out :start start))))
 
 (defun %parts (parts) (if (listp parts) parts (list parts)))
 
@@ -56,6 +62,10 @@ written."
 (defun hmac-sha256-into (key parts out &key (start 0)) (hmac-into :sha256 key parts out :start start))
 (defun hmac-sha384-into (key parts out &key (start 0)) (hmac-into :sha384 key parts out :start start))
 (defun hmac-sha512-into (key parts out &key (start 0)) (hmac-into :sha512 key parts out :start start))
+
+(defun hmac-sha1 (key msg)
+  "HMAC-SHA1 of MSG under KEY -> fresh 20-byte digest.  Legacy protocols only (STUN)."
+  (hmac-into :sha1 key msg (make-u8v 20)))
 
 (defun hmac-sha256 (key msg)
   "HMAC-SHA256 of MSG under KEY → fresh 32-byte digest."
