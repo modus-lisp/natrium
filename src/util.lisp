@@ -4,6 +4,14 @@
 
 (deftype u8v () '(simple-array (unsigned-byte 8) (*)))
 
+;;; A constant a saved image carries (a bignum, a field element) is not trustworthy after a
+;;; restore at another address: on the phone the saved *p25519* came back unprintable.  So each
+;;; such constant has a refresh that builds it again, registered here to run after a restore, in
+;;; load order (a later constant may use an earlier one).
+(defun %on-restore-refresh (fn)
+  (let ((add (find-symbol "ADD-RESTORE-HOOK" "MODUS")))
+    (when (and add (fboundp add)) (funcall add fn))))
+
 (declaim (ftype (function (fixnum &optional (unsigned-byte 8)) u8v) make-u8v))
 (defun make-u8v (n &optional (init 0))
   "Fresh (unsigned-byte 8) simple-array of length N."

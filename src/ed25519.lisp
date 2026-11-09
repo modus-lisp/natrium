@@ -29,6 +29,12 @@
   "Edwards curve constant d = -121665/121666 mod p.")
 (defparameter *sqrtm1* (fe-pow 2 (/ (1- *p25519*) 4))
   "A square root of -1 mod p (= 2^((p-1)/4)).")
+(defun %refresh-ed25519-constants ()
+  (setf *l25519* (+ (ash 1 252) 27742317777372353535851937790883648493)
+        *d25519* (fmul -121665 (fe-inv 121666))
+        *sqrtm1* (fe-pow 2 (/ (1- *p25519*) 4)))
+  nil)
+(%on-restore-refresh #'%refresh-ed25519-constants)
 
 ;;; Points in extended coordinates (X,Y,Z,T): x = X/Z, y = Y/Z, xy = T/Z.
 (defstruct (ept (:constructor ept (x y z w)) (:conc-name ept-))

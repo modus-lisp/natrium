@@ -16,14 +16,17 @@
 (in-package #:natrium)
 
 ;;; --- curve constants as field elements -----------------------------------
-(defparameter *fe-2d* (integer->fe (mod (* 2 *d25519*) *p25519*))
-  "2*d as a field element (the edc-add curve constant).")
-(defparameter *edc-base*
+;;; The curve constants are field elements, built when this file loads.  A saved image carries
+;;; them, and a restored one relocates its heap, so each is built again on restore
+;;; (%REFRESH-CURVE-CONSTANTS, through MODUS's restore hooks).  The builders are these functions.
+(defun %fe-2d () (integer->fe (mod (* 2 *d25519*) *p25519*)))
+(defun %edc-base ()
   (let* ((by (fmul 4 (fe-inv 5)))
          (bx (ed-recover-x by 0)))
     (ept (integer->fe bx) (integer->fe by) (fe-one)
-         (integer->fe (fmul bx by))))
-  "The edwards25519 base point with fe25519 coordinates.")
+         (integer->fe (fmul bx by)))))
+(defparameter *fe-2d* (%fe-2d) "2*d as a field element (the edc-add curve constant).")
+(defparameter *edc-base* (%edc-base) "The edwards25519 base point with fe25519 coordinates.")
 
 (defun edc-identity ()
   (ept (fe-zero) (fe-one) (fe-one) (fe-zero)))
@@ -67,8 +70,10 @@
     (setf (aref out 31) (logior (aref out 31) (ash (logand (aref xbytes 0) 1) 7)))
     out))
 
-(defparameter *fe-d* (integer->fe *d25519*) "d as a field element.")
-(defparameter *fe-sqrtm1* (integer->fe *sqrtm1*) "sqrt(-1) as a field element.")
+(defun %fe-d () (integer->fe *d25519*))
+(defun %fe-sqrtm1 () (integer->fe *sqrtm1*))
+(defparameter *fe-d* (%fe-d) "d as a field element.")
+(defparameter *fe-sqrtm1* (%fe-sqrtm1) "sqrt(-1) as a field element.")
 (defparameter *fe-p58* (/ (- *p25519* 5) 8) "The (p-5)/8 exponent of RFC 8032 5.1.3.")
 
 (defun fe25519-equal-p (a b)
@@ -124,8 +129,15 @@
                (fe25519-tobytes (fe25519-mul (ept-y q) (ept-z p))))))
 
 ;;; --- scalar arithmetic mod L (Barrett) -----------------------------------
-(defparameter *l-mu* (floor (ash 1 512) *l25519*)
-  "Barrett parameter floor(2^512 / L).")
+(defun %l-mu () (floor (ash 1 512) *l25519*))
+(defparameter *l-mu* (%l-mu) "Barrett parameter floor(2^512 / L).")
+
+;;; Built again after a restore, as above: the restored copies are not to be trusted.
+(defun %refresh-curve-constants ()
+  (setf *fe-2d* (%fe-2d) *edc-base* (%edc-base) *fe-d* (%fe-d) *fe-sqrtm1* (%fe-sqrtm1)
+        *fe-p58* (/ (- *p25519* 5) 8) *l-mu* (%l-mu))
+  nil)
+(%on-restore-refresh #'%refresh-curve-constants)
 
 (defun sc-reduce (x)
   "X mod L for 0 <= X < 2^512, via Barrett with a fixed operation shape: two

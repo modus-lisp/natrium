@@ -12,6 +12,8 @@
 
 (defparameter *p25519* (- (ash 1 255) 19)
   "The Curve25519 field prime, 2^255 - 19.")
+(defun %refresh-p25519 () (setf *p25519* (- (ash 1 255) 19)) nil)
+(%on-restore-refresh #'%refresh-p25519)
 
 (defun fe-pow (base e)
   "BASE^E mod *p25519* by square-and-multiply (E public: only used for the fixed
