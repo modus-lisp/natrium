@@ -103,14 +103,26 @@ are bound in MODUS (%STATIC-ALLOC among them)."
     (funcall (or (%baked "%GC-SAFE-BLOCK-6") (error "gossamer: this modus image has no syscall path"))
              n a b c d))
 
+  (defun %darwin-host-p ()
+    "True in a Darwin image (MODUS_DARWIN): its syscalls go to the macOS shim.  %LAYOUT is
+folded to a constant by the image's compiler, as gc.lisp reads it."
+    (eql 1 (%layout :darwin 0)))
+
   (defun %arena-numbers ()
-    "(mmap mlock madvise) for this architecture, or NIL."
+    "(mmap mlock madvise) for this architecture, or NIL.  On Darwin the shim serves mlock
+at its own number (1020: Linux's aarch64 mlock, 228, faults there), and madvise is NIL:
+macOS has neither MADV_DONTDUMP nor MADV_WIPEONFORK."
     (and (member :linux *features*)
          (let ((m (string-downcase (or (ignore-errors (machine-type)) ""))))
            (cond ((search "x86_64" m) '(9 149 28))
-                 ((or (search "aarch64" m) (search "arm64" m)) '(222 228 233))))))
+                 ((or (search "aarch64" m) (search "arm64" m))
+                  (if (%darwin-host-p) '(222 1020 nil) '(222 228 233)))))))
 
-  (defun %arena-available-p () (/= *ctl* 0))
+  (defun %arena-available-p ()
+    ;; The init at load time can run before the image's syscall path is bound (then it
+    ;; takes the static branch and gets nothing), so the first use retries it.
+    (when (zerop *ctl*) (%arena-init))
+    (/= *ctl* 0))
 
   (defconstant +static-chunk+ (* 256 1024)
     "A bare-metal arena chunk: the static region is a few MB for everything that must
@@ -137,9 +149,10 @@ a forked child.  Returns the raw address."
       (let ((raw (%syscall mmap 0 size 3 #x22)))
         (when (or (not (integerp raw)) (< raw 4096))
           (error "gossamer: mmap for the secret arena failed (~a)" raw))
-        (%syscall mlock raw size 0 0)            ; may fail under RLIMIT_MEMLOCK: best effort
-        (%syscall madvise raw size 16 0)         ; MADV_DONTDUMP
-        (%syscall madvise raw size 18 0)         ; MADV_WIPEONFORK
+        (when mlock (%syscall mlock raw size 0 0))  ; may fail under RLIMIT_MEMLOCK: best effort
+        (when madvise                               ; Linux only
+          (%syscall madvise raw size 16 0)         ; MADV_DONTDUMP
+          (%syscall madvise raw size 18 0))        ; MADV_WIPEONFORK
         raw)))
 
   (defun %arena-init ()
