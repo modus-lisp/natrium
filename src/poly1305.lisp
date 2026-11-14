@@ -25,8 +25,8 @@
 ;;; fold back with the *5 wrap) and a fixed carry chain — no data-dependent
 ;;; branch/index/count.  Uniform structure like fe25519; the native backend
 ;;; closes the instruction-level gap.  (r,s) is a one-time key per message.
-(defun poly1305-mac (key msg)
-  "Poly1305 tag of MSG under the 32-byte one-time KEY -> fresh 16-byte tag."
+(defun poly1305-mac (key msg &key (end (length msg)))
+  "Poly1305 tag of MSG (its first END bytes) under the 32-byte one-time KEY -> fresh 16-byte tag."
   (declare (type u8v key msg))
   (let* ((m26 #x3ffffff)
          ;; Clamped r as five 26-bit limbs straight from the key bytes (donna):
@@ -39,7 +39,7 @@
          (s1 (* 5 r1)) (s2 (* 5 r2)) (s3 (* 5 r3)) (s4 (* 5 r4))
          (h0 0) (h1 0) (h2 0) (h3 0) (h4 0)
          (pad (make-array 16 :element-type '(unsigned-byte 8) :initial-element 0))
-         (len (length msg)))
+         (len end))
     (loop for i from 0 below len by 16 do
       ;; Limbs straight from the bytes (poly1305-donna): four overlapping
       ;; little-endian u32 reads, shifted and masked -- all fixnum.  Decoding

@@ -35,7 +35,7 @@
    #:drbg-instantiate #:drbg-generate #:drbg-generate-into #:drbg-reseed
    ;; stream cipher + AEAD
    #:chacha20 #:chacha20-block
-   #:chacha20-original #:chacha20-original-block
+   #:chacha20-original #:chacha20-original-block #:chacha20-original-xor
    #:poly1305-mac #:poly1305-key-gen
    #:chacha20-poly1305-encrypt #:chacha20-poly1305-decrypt
    ;; AES (constant-time, bit-sliced S-box)
