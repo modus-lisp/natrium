@@ -9,7 +9,9 @@
 ;;; such constant has a refresh that builds it again, registered here to run after a restore, in
 ;;; load order (a later constant may use an earlier one).
 (defun %on-restore-refresh (fn)
-  (let ((add (find-symbol "ADD-RESTORE-HOOK" "MODUS")))
+  ;; FIND-PACKAGE first: FIND-SYMBOL signals when the package does not exist, as on SBCL.
+  (let* ((pkg (find-package "MODUS"))
+         (add (and pkg (find-symbol "ADD-RESTORE-HOOK" pkg))))
     (when (and add (fboundp add)) (funcall add fn))))
 
 (declaim (ftype (function (fixnum &optional (unsigned-byte 8)) u8v) make-u8v))

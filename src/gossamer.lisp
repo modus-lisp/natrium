@@ -135,7 +135,8 @@ not move, so it is taken a little at a time.")
 
   (defun %on-restore (fn)
     "Run FN after this image is saved and restored (modus's restore hooks), if it can."
-    (let ((add (find-symbol "ADD-RESTORE-HOOK" "MODUS")))
+    (let* ((pkg (find-package "MODUS"))
+           (add (and pkg (find-symbol "ADD-RESTORE-HOOK" pkg))))
       (when (and add (fboundp add)) (funcall add fn))))
 
   (defmacro %ctl (off) `(mem-ref (+ *ctl* ,off) :u64))
