@@ -407,3 +407,80 @@ the pool on every exit, normal or not."
     `(let ,(loop for (var kind n) in specs collect `(,var (%acquire ,kind ,n)))
        (unwind-protect (progn ,@body)
          ,@cleanups))))
+
+;;; ---------------------------------------------------------------------------
+;;; The keychain: secrets kept by the system between runs, read straight into fixed memory.
+;;; ---------------------------------------------------------------------------
+;;;
+;;; A secret that outlives the process (an identity key) is kept by the platform's keychain, not in a
+;;; file: KEYCHAIN-KEEP hands it over, KEYCHAIN-RECALL reads it back INTO A FIXED BUFFER -- the keychain
+;;; writes the bytes there in place, so they are never on the moving heap, not even for a moment.  Every
+;;; address the keychain is given is a fixed buffer's (the name too), which no collection can move between
+;;; taking the address and the call.
+;;;
+;;; Backends:
+;;;   modus on Darwin (macOS, iOS: MODUS_DARWIN)  the system keychain, through the shim's pseudo-syscalls
+;;;          1030 (get: name, buffer, capacity -> length, 0 for none) and 1031 (put: name, buffer, length
+;;;          -> 1 stored) -- host/macos/modus-keychain.m, generic passwords, accessible after first unlock.
+;;;   anything else  *KEYCHAIN*, when a program supplies one (a test, another platform's store); otherwise
+;;;          none, and KEYCHAIN-KEEP / -RECALL signal NO-KEYCHAIN rather than pretend.
+
+(export '(*keychain* keychain-available-p keychain-keep keychain-recall no-keychain))
+
+(define-condition no-keychain (error) ()
+  (:report "gossamer: this platform has no keychain (and *KEYCHAIN* names none)"))
+
+(defvar *keychain* nil
+  "A keychain of the program's own, or NIL for the platform's: a cons (GET . PUT).  GET is called with
+(NAME BUFFER), BUFFER a fixed octet vector to fill, and returns how many bytes it wrote (0: none kept);
+PUT with (NAME BUFFER LENGTH), and returns true if it kept them.")
+
+(defun %native-keychain-p ()
+  #+modus (and (ignore-errors (%darwin-host-p)) (%arena-available-p) t)
+  #-modus nil)
+
+(defun keychain-available-p ()
+  "Whether secrets can be kept between runs here."
+  (or (and *keychain* t) (%native-keychain-p)))
+
+#+modus
+(defun %data-address (fixed)
+  "The raw address of a fixed octet vector's first element (its header, 8 bytes of padding, then the bytes)."
+  (+ (%val->word fixed) 7))
+
+(defun %fixed-cstring (name)
+  "NAME as a NUL-terminated string of octets, in a pooled fixed buffer (release it)."
+  (let* ((n (length name)) (b (%acquire :octets (1+ n))))
+    (dotimes (i n b) (setf (aref b i) (logand #xff (char-code (char name i)))))))
+
+(defun keychain-keep (name secret)
+  "Keep the octets SECRET under NAME, replacing what was kept there.  True if the keychain took them.  A
+SECRET not in fixed memory is copied into a pooled fixed buffer for the call (and that wiped after)."
+  (cond (*keychain*
+         (funcall (cdr *keychain*) name secret (length secret)))
+        ((%native-keychain-p)
+         #+modus
+         (let ((cname (%fixed-cstring name))
+               (data (if (fixed-p secret) secret (pooled-copy secret))))
+           (unwind-protect
+                (eql 1 (%syscall 1031 (%data-address cname) (%data-address data) (length secret) 0))
+             (%release :octets (length cname) cname)
+             (unless (eq data secret) (free data)))))
+        (t (error 'no-keychain))))
+
+(defun keychain-recall (name &key (max 512))
+  "The secret kept under NAME, in a fixed octet vector of its own length (the caller's to keep -- or FREE),
+or NIL if none is kept.  At most MAX bytes."
+  (cond (*keychain*
+         (with-fixed-scratch ((buf :octets max))
+           (let ((n (funcall (car *keychain*) name buf)))
+             (and (integerp n) (plusp n) (fixed-copy buf :end n)))))
+        ((%native-keychain-p)
+         #+modus
+         (let ((cname (%fixed-cstring name)))
+           (unwind-protect
+                (with-fixed-scratch ((buf :octets max))
+                  (let ((n (%syscall 1030 (%data-address cname) (%data-address buf) max 0)))
+                    (and (integerp n) (plusp n) (<= n max) (fixed-copy buf :end n))))
+             (%release :octets (length cname) cname))))
+        (t (error 'no-keychain))))

@@ -81,5 +81,26 @@
                 (loop for i below 8 always (= (aref f i) (* i 1000003)))))
     (gossamer:free a) (gossamer:free f))
   (check "the backend is real here" (not (eq (gossamer:fixed-backend) :none)))
+  ;; the keychain: a program's own (a hash table standing in for the system's), and none
+  (let* ((kept (make-hash-table :test 'equal))
+         (filled nil)
+         (gossamer:*keychain*
+           (cons (lambda (name buf)
+                   (setf filled buf)
+                   (let ((v (gethash name kept))) (if v (progn (replace buf v) (length v)) 0)))
+                 (lambda (name buf n) (setf (gethash name kept) (subseq buf 0 n)) t))))
+    (check "the keychain is there when one is given" (gossamer:keychain-available-p))
+    (check "a secret kept" (gossamer:keychain-keep "id" (coerce #(1 2 3 4 5) '(simple-array (unsigned-byte 8) (*)))))
+    (let ((back (gossamer:keychain-recall "id")))
+      (check "recalled whole" (equalp back #(1 2 3 4 5)))
+      (check "into fixed memory" (gossamer:fixed-p back))
+      (check "the keychain wrote into fixed memory too" (gossamer:fixed-p filled))
+      (check "and that scratch was wiped after" (every #'zerop filled)))
+    (check "nothing kept: NIL" (null (gossamer:keychain-recall "nobody"))))
+  #-modus
+  (let ((gossamer:*keychain* nil))
+    (check "no keychain here: said, not pretended"
+           (and (not (gossamer:keychain-available-p))
+                (handler-case (progn (gossamer:keychain-recall "id") nil) (gossamer:no-keychain () t)))))
   (format t "~&gossamer: ~d passed, ~d failed~%" *pass* (length *fail*))
   (null *fail*))
