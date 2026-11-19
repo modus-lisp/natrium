@@ -140,15 +140,19 @@ heap bignum."
   "A u64 V as (values HI LO), 32 bits each."
   (values (ldb (byte 32 32) v) (ldb (byte 32 0) v)))
 
-(defvar *%s5-k* nil)
+(defun %s5-k-table ()
+  (let ((v (make-array 160 :initial-element 0)))
+    (dotimes (i 80 v)
+      (multiple-value-bind (hi lo) (%s5-split (aref +sha512-k+ i))
+        (setf (aref v (* 2 i)) hi (aref v (1+ (* 2 i))) lo)))))
+
+;;; Built when the file is LOADED, not on first use: the first hash may be a worker thread's (a TLS
+;;; handshake's HMAC-DRBG), and on modus a worker cannot store the table it built into a global -- threads
+;;; share no state, and the store is refused.  It is a constant; nothing is lost by making it up front.
+(defvar *%s5-k* (%s5-k-table))
 (defun %s5-k ()
-  "+SHA512-K+ split once into a 160-slot (hi lo hi lo ...) vector."
-  (or *%s5-k*
-      (let ((v (make-array 160 :initial-element 0)))
-        (dotimes (i 80)
-          (multiple-value-bind (hi lo) (%s5-split (aref +sha512-k+ i))
-            (setf (aref v (* 2 i)) hi (aref v (1+ (* 2 i))) lo)))
-        (setq *%s5-k* v))))
+  "+SHA512-K+ split into a 160-slot (hi lo hi lo ...) vector."
+  *%s5-k*)
 
 (defconstant +sha512-h-len+ 16)
 (defconstant +sha512-w-len+ 160)
