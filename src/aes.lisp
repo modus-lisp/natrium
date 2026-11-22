@@ -173,6 +173,208 @@ planes :X2 :X3 :X12 :T and the 15-word product buffer :C."
     (dotimes (i 16 s) (setf (aref s i) (logxor (aref s i) (aref sched (+ o i)))))))
 
 ;;; ---------------------------------------------------------------------------
+;;; Encryption on bit-planes, all the way through.
+;;;
+;;; The state is packed into eight 16-lane planes once, goes through every round as planes, and is unpacked
+;;; once: ShiftRows is a rotation of each row's lanes, MixColumns a rotation of lanes within each column with
+;;; xtime a shuffle of planes, AddRoundKey an XOR with the round key's planes (packed when the key is made).
+;;; SubBytes is Boyar and Peralta's circuit for the S-box (J. Boyar, R. Peralta, "A depth-16 circuit for the
+;;; AES S-box", 2011): 32 ANDs and 83 XORs on the planes -- no table and no branch, as before, and a small
+;;; part of the work of the multiplication chain above (which decryption still uses).
+;;; ---------------------------------------------------------------------------
+
+(eval-when (:compile-toplevel :load-toplevel :execute)
+(defparameter +aes-sbox-gates+
+  '((y14 x3 "^" x5)
+    (y13 x0 "^" x6)
+    (y9 x0 "^" x3)
+    (y8 x0 "^" x5)
+    (t0 x1 "^" x2)
+    (y1 t0 "^" x7)
+    (y4 y1 "^" x3)
+    (y12 y13 "^" y14)
+    (y2 y1 "^" x0)
+    (y5 y1 "^" x6)
+    (y3 y5 "^" y8)
+    (t1 x4 "^" y12)
+    (y15 t1 "^" x5)
+    (y20 t1 "^" x1)
+    (y6 y15 "^" x7)
+    (y10 y15 "^" t0)
+    (y11 y20 "^" y9)
+    (y7 x7 "^" y11)
+    (y17 y10 "^" y11)
+    (y19 y10 "^" y8)
+    (y16 t0 "^" y11)
+    (y21 y13 "^" y16)
+    (y18 x0 "^" y16)
+    (t2 y12 "&" y15)
+    (t3 y3 "&" y6)
+    (t4 t3 "^" t2)
+    (t5 y4 "&" x7)
+    (t6 t5 "^" t2)
+    (t7 y13 "&" y16)
+    (t8 y5 "&" y1)
+    (t9 t8 "^" t7)
+    (t10 y2 "&" y7)
+    (t11 t10 "^" t7)
+    (t12 y9 "&" y11)
+    (t13 y14 "&" y17)
+    (t14 t13 "^" t12)
+    (t15 y8 "&" y10)
+    (t16 t15 "^" t12)
+    (t17 t4 "^" t14)
+    (t18 t6 "^" t16)
+    (t19 t9 "^" t14)
+    (t20 t11 "^" t16)
+    (t21 t17 "^" y20)
+    (t22 t18 "^" y19)
+    (t23 t19 "^" y21)
+    (t24 t20 "^" y18)
+    (t25 t21 "^" t22)
+    (t26 t21 "&" t23)
+    (t27 t24 "^" t26)
+    (t28 t25 "&" t27)
+    (t29 t28 "^" t22)
+    (t30 t23 "^" t24)
+    (t31 t22 "^" t26)
+    (t32 t31 "&" t30)
+    (t33 t32 "^" t24)
+    (t34 t23 "^" t33)
+    (t35 t27 "^" t33)
+    (t36 t24 "&" t35)
+    (t37 t36 "^" t34)
+    (t38 t27 "^" t36)
+    (t39 t29 "&" t38)
+    (t40 t25 "^" t39)
+    (t41 t40 "^" t37)
+    (t42 t29 "^" t33)
+    (t43 t29 "^" t40)
+    (t44 t33 "^" t37)
+    (t45 t42 "^" t41)
+    (z0 t44 "&" y15)
+    (z1 t37 "&" y6)
+    (z2 t33 "&" x7)
+    (z3 t43 "&" y16)
+    (z4 t40 "&" y1)
+    (z5 t29 "&" y7)
+    (z6 t42 "&" y11)
+    (z7 t45 "&" y17)
+    (z8 t41 "&" y10)
+    (z9 t44 "&" y12)
+    (z10 t37 "&" y3)
+    (z11 t33 "&" y4)
+    (z12 t43 "&" y13)
+    (z13 t40 "&" y5)
+    (z14 t29 "&" y2)
+    (z15 t42 "&" y9)
+    (z16 t45 "&" y14)
+    (z17 t41 "&" y8)
+    (t46 z15 "^" z16)
+    (t47 z10 "^" z11)
+    (t48 z5 "^" z13)
+    (t49 z9 "^" z10)
+    (t50 z2 "^" z12)
+    (t51 z2 "^" z5)
+    (t52 z7 "^" z8)
+    (t53 z0 "^" z3)
+    (t54 z6 "^" z7)
+    (t55 z16 "^" z17)
+    (t56 z12 "^" t48)
+    (t57 t50 "^" t53)
+    (t58 z4 "^" t46)
+    (t59 z3 "^" t54)
+    (t60 t46 "^" t57)
+    (t61 z14 "^" t57)
+    (t62 t52 "^" t58)
+    (t63 t49 "^" t58)
+    (t64 z4 "^" t59)
+    (t65 t61 "^" t62)
+    (t66 z1 "^" t63)
+    (s0 t59 "^" t63)
+    (s6 t56 "^~" t62)
+    (s7 t48 "^~" t60)
+    (t67 t64 "^" t65)
+    (s3 t53 "^" t66)
+    (s4 t51 "^" t66)
+    (s5 t47 "^" t65)
+    (s1 t64 "^~" s3)
+    (s2 t55 "^~" t67))
+  "Boyar-Peralta's S-box: (OUT A OP B), OP ^ (xor), & (and) or ^~ (xor with the complement of B).  The
+inputs X0..X7 are a byte's bits from the most significant; the outputs S0..S7 likewise."))
+
+(defmacro %aes-sbox-planes! (b0 b1 b2 b3 b4 b5 b6 b7)
+  "SubBytes on the planes B0..B7 (B0 the least significant bit of every byte), in place."
+  (let ((vars (append '(x0 x1 x2 x3 x4 x5 x6 x7) (mapcar #'first +aes-sbox-gates+))))
+    `(let* ((x0 ,b7) (x1 ,b6) (x2 ,b5) (x3 ,b4) (x4 ,b3) (x5 ,b2) (x6 ,b1) (x7 ,b0)
+            ,@(loop for (out a op b) in +aes-sbox-gates+
+                    collect `(,out ,(cond ((string= op "^") `(logxor ,a ,b))
+                                          ((string= op "&") `(logand ,a ,b))
+                                          (t `(logxor ,a (logxor ,b +aes-lanes+)))))))
+       (declare (type (unsigned-byte 16) ,@vars) (ignorable ,@vars))
+       (setf ,b7 s0 ,b6 s1 ,b5 s2 ,b4 s3 ,b3 s4 ,b2 s5 ,b1 s6 ,b0 s7))))
+
+(declaim (inline %rotr16 %aes-sr-plane %aes-col-rot1 %aes-col-rot2 %aes-col-rot3))
+(defun %rotr16 (v k)
+  (declare (type (unsigned-byte 16) v) (type (integer 1 15) k))
+  (logand #xFFFF (logior (ash v (- k)) (ash v (- 16 k)))))
+
+(defun %aes-sr-plane (x)
+  "ShiftRows on one plane: lane r+4c is the byte at row r, column c; row r turns left by r columns."
+  (declare (type (unsigned-byte 16) x))
+  (logior (logand x #x1111) (%rotr16 (logand x #x2222) 4) (%rotr16 (logand x #x4444) 8)
+          (%rotr16 (logand x #x8888) 12)))
+
+;; each lane takes the lane K rows below it in its column, wrapping: row r gets row r+K
+(defun %aes-col-rot1 (x)
+  (declare (type (unsigned-byte 16) x))
+  (logior (logand (ash x -1) #x7777) (logand (ash x 3) #x8888)))
+(defun %aes-col-rot2 (x)
+  (declare (type (unsigned-byte 16) x))
+  (logior (logand (ash x -2) #x3333) (logand (ash x 2) #xCCCC)))
+(defun %aes-col-rot3 (x)
+  (declare (type (unsigned-byte 16) x))
+  (logior (logand (ash x -3) #x1111) (logand (ash x 1) #xEEEE)))
+
+(defun %aes-encrypt-planes! (p rk nr)
+  "P (8 planes) <- AES encryption of NR rounds under the round-key planes RK (8 a round)."
+  (declare (type (simple-array fixnum (*)) p rk) (type (integer 10 14) nr) (optimize speed (safety 0)))
+  (let ((b0 (aref p 0)) (b1 (aref p 1)) (b2 (aref p 2)) (b3 (aref p 3))
+        (b4 (aref p 4)) (b5 (aref p 5)) (b6 (aref p 6)) (b7 (aref p 7)))
+    (declare (type (unsigned-byte 16) b0 b1 b2 b3 b4 b5 b6 b7))
+    (macrolet ((ark (round)
+                 `(let ((o (* 8 ,round)))
+                    (declare (type fixnum o))
+                    ,@(loop for b in '(b0 b1 b2 b3 b4 b5 b6 b7) for i from 0
+                            collect `(setf ,b (logxor ,b (the (unsigned-byte 16) (aref rk (+ o ,i))))))))
+               (sr () `(setf ,@(loop for b in '(b0 b1 b2 b3 b4 b5 b6 b7) append `(,b (%aes-sr-plane ,b)))))
+               (mc ()
+                 ;; each byte <- 2a + 3a1 + a2 + a3 (a1 the next row's, and so on) = xtime(a + a1) + a1 + a2 + a3
+                 (let ((bs '(b0 b1 b2 b3 b4 b5 b6 b7))
+                       (us '(u0 u1 u2 u3 u4 u5 u6 u7))
+                       (rs '(r0 r1 r2 r3 r4 r5 r6 r7)))
+                   `(let* (,@(loop for b in bs for u in us for r in rs
+                                   append `((,r (logxor (%aes-col-rot1 ,b) (%aes-col-rot2 ,b) (%aes-col-rot3 ,b)))
+                                            (,u (logxor ,b (%aes-col-rot1 ,b))))))
+                      (declare (type (unsigned-byte 16) ,@us ,@rs))
+                      ;; xtime on planes: bit i <- bit i-1, and the bit shifted out (u7) folds back as #x1B
+                      (setf b0 (logxor u7 r0)
+                            b1 (logxor u0 u7 r1)
+                            b2 (logxor u1 r2)
+                            b3 (logxor u2 u7 r3)
+                            b4 (logxor u3 u7 r4)
+                            b5 (logxor u4 r5)
+                            b6 (logxor u5 r6)
+                            b7 (logxor u6 r7))))))
+      (ark 0)
+      (loop for round of-type fixnum from 1 below nr
+            do (%aes-sbox-planes! b0 b1 b2 b3 b4 b5 b6 b7) (sr) (mc) (ark round))
+      (%aes-sbox-planes! b0 b1 b2 b3 b4 b5 b6 b7) (sr) (ark nr))
+    (setf (aref p 0) b0 (aref p 1) b1 (aref p 2) b2 (aref p 3) b3
+          (aref p 4) b4 (aref p 5) b5 (aref p 6) b6 (aref p 7) b7)
+    p))
+
+;;; ---------------------------------------------------------------------------
 ;;; Scratch: one bundle per operation, every buffer fixed and wiped on exit.
 ;;; ---------------------------------------------------------------------------
 
@@ -188,9 +390,10 @@ to fixed 16-octet blocks."
 ;;; Keys.
 ;;; ---------------------------------------------------------------------------
 
-(defstruct (aes-key (:constructor %make-aes-key (rounds schedule)))
+(defstruct (aes-key (:constructor %make-aes-key (rounds schedule planes)))
   rounds      ; 10, 12 or 14
-  schedule)   ; pooled fixed octets, 16 * (rounds + 1)
+  schedule    ; pooled fixed octets, 16 * (rounds + 1)
+  planes)     ; the same round keys as bit-planes (encryption's): pooled fixed fixnums, 8 * (rounds + 1)
 
 (defun %aes-expand! (key sched nk rounds w s)
   "FIPS 197 KeyExpansion of KEY (NK words) into SCHED, as bytes."
@@ -219,18 +422,25 @@ The schedule is a pooled fixed buffer owned by the result; AES-KEY-WIPE returns 
   (gossamer:check-fixed key "AES key")
   (let* ((nk (ecase (length key) (16 4) (24 6) (32 8)))
          (rounds (+ nk 6))
-         (sched (gossamer:acquire :octets (* 16 (1+ rounds)))))
+         (sched (gossamer:acquire :octets (* 16 (1+ rounds))))
+         (planes (gossamer:acquire :fixnums (* 8 (1+ rounds)))))
     (%with-aes-scratch (w s tmp)
       (declare (ignore tmp))
-      (%aes-expand! key sched nk rounds w s))
-    (gossamer:own (%make-aes-key rounds sched) sched)))
+      (%aes-expand! key sched nk rounds w s)
+      (let ((p (aref w 0)))                    ; each round key as planes too
+        (dotimes (r (1+ rounds))
+          (replace s sched :start2 (* 16 r) :end2 (* 16 (1+ r)))
+          (%aes-pack! p s)
+          (replace planes p :start1 (* 8 r)))))
+    (gossamer:own (%make-aes-key rounds sched planes) sched planes)))
 
 (defun aes-key-wipe (k)
   "Wipe K's schedule and return it to the pool.  K is unusable afterwards."
   (when (aes-key-schedule k)
     (gossamer:disown k)
     (gossamer:free (aes-key-schedule k))
-    (setf (aes-key-schedule k) nil))
+    (gossamer:free (aes-key-planes k))
+    (setf (aes-key-schedule k) nil (aes-key-planes k) nil))
   k)
 
 (defmacro with-aes-key ((var key) &body body)
@@ -246,14 +456,13 @@ The schedule is a pooled fixed buffer owned by the result; AES-KEY-WIPE returns 
 ;;; ---------------------------------------------------------------------------
 
 (defun %aes-encrypt! (k s w tmp)
-  "S (16 fixed octets) <- AES_K(S)."
-  (let ((sched (%aes-live k)) (nr (aes-key-rounds k)))
-    (%aes-add-round-key! s sched 0)
-    (loop for round from 1 below nr
-          do (%aes-sub-bytes! s w) (%aes-shift-rows! s tmp) (%aes-mix-columns! s)
-             (%aes-add-round-key! s sched round))
-    (%aes-sub-bytes! s w) (%aes-shift-rows! s tmp)
-    (%aes-add-round-key! s sched nr)))
+  "S (16 fixed octets) <- AES_K(S): packed into planes, every round there, unpacked."
+  (declare (ignore tmp))
+  (%aes-live k)
+  (let ((p (aref w 0)))
+    (%aes-pack! p s)
+    (%aes-encrypt-planes! p (aes-key-planes k) (aes-key-rounds k))
+    (%aes-unpack! s p)))
 
 (defun %aes-decrypt! (k s w tmp)
   "S (16 fixed octets) <- AES_K^-1(S)."

@@ -138,7 +138,11 @@
                  (bytes->hex pt)))
         (check "aes-128-ctr (SP 800-38A F.5.1)"
                (n:aes-ctr-xor-into k (hex->bytes "f0f1f2f3f4f5f6f7f8f9fafbfcfdfeff") pt (n:make-u8v 64))
-               "874d6191b620e3261bef6864990db6ce9806f66b7970fdff8617187bb9fffdff5ae4df3edbd5d35e5b4f09020db03eab1e031dda2fbe03d1792170a0f3009cee")))
+               "874d6191b620e3261bef6864990db6ce9806f66b7970fdff8617187bb9fffdff5ae4df3edbd5d35e5b4f09020db03eab1e031dda2fbe03d1792170a0f3009cee")
+        ;; AES-CMAC (RFC 4493 4): the same key, the first 0, 16, 40 and 64 bytes of the same message
+        (loop for (len tag) in '((0 "bb1d6929e95937287fa37d129b756746") (16 "070a16b46b4d4144f79bdd9dd04a287c")
+                                 (40 "dfa66747de9ae63030ca32611497c827") (64 "51f0bebf7e3b9d92fc49741779363cfe"))
+              do (check (format nil "aes-cmac ~d bytes (RFC 4493)" len) (n:aes-cmac k (subseq pt 0 len)) tag))))
     (incf *count*)
     (if (handler-case (progn (n:make-aes-key (hex->bytes "000102030405060708090a0b0c0d0e0f")) nil)
           (gossamer:not-fixed () t))
