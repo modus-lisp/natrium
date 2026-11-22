@@ -367,26 +367,33 @@ OUT at OUT-START.  Encryption and decryption are the same operation.  Returns OU
     (when (= carry 1) (setf (aref out 15) (logxor (aref out 15) #x87)))
     out))
 
-(defun aes-cmac (k msg)
-  "The 16-byte AES-CMAC of the byte vector MSG under the AES-KEY K (MAKE-AES-KEY)."
-  (let* ((zero (make-u8v 16)) (l (make-u8v 16)))
-    (aes-encrypt-block k zero l)
+(defun aes-cmac (k msg &key (end (length msg)))
+  "The 16-byte AES-CMAC of the byte vector MSG (up to END) under the AES-KEY K (MAKE-AES-KEY).  MSG is
+   read in place; the cipher's scratch is taken once for the whole message, not per block."
+  (let* ((l (make-u8v 16)))
+    (aes-encrypt-block k (make-u8v 16) l)
     (let* ((k1 (%cmac-dbl l)) (k2 (%cmac-dbl k1))
-           (n (length msg))
+           (n end)
            (blocks (max 1 (ceiling n 16)))
            (complete (and (plusp n) (zerop (mod n 16))))
-           (x (make-u8v 16)) (y (make-u8v 16)))
-      (dotimes (bi blocks)
-        (let ((last (= bi (1- blocks))) (off (* 16 bi)))
-          (dotimes (i 16)
-            (let* ((j (+ off i))
-                   (m (cond ((< j n) (aref msg j))
-                            ((= j n) #x80)            ; the padding a short last block gets
-                            (t 0))))
-              (setf (aref y i)
-                    (logxor (aref x i) m
-                            (if last (aref (if complete k1 k2) i) 0)))))
-          (aes-encrypt-block k y x)))
+           (x (make-u8v 16)))
+      (%with-aes-scratch (w y tmp)
+        ;; Y is the running state: X xor the block, encrypted in place
+        (dotimes (bi blocks)
+          (let ((last (= bi (1- blocks))) (off (* 16 bi)))
+            (if (and (not last) (typep msg '(simple-array (unsigned-byte 8) (*))))
+                (let ((msg msg))
+                  (declare (type (simple-array (unsigned-byte 8) (*)) msg))
+                  (dotimes (i 16) (setf (aref y i) (logxor (aref x i) (aref msg (+ off i))))))
+                (dotimes (i 16)
+                  (let* ((j (+ off i))
+                         (m (cond ((< j n) (aref msg j))
+                                  ((= j n) #x80)          ; the padding a short last block gets
+                                  (t 0))))
+                    (setf (aref y i)
+                          (logxor (aref x i) m (if last (aref (if complete k1 k2) i) 0))))))
+            (%aes-encrypt! k y w tmp)
+            (replace x y))))
       x)))
 
 (defun make-aes-ctr-stream (k iv)
