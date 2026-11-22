@@ -211,6 +211,48 @@
         (dotimes (k 4) (setf (aref out (+ (* 4 i) k)) (ldb (byte 8 (* 8 k)) w))))
       out)))
 
+;;; --- MD4 (RFC 1320) --------------------------------------------------------
+;;; Broken as a hash, and here only because NTLM's password hash IS MD4 of the UTF-16LE
+;;; password (MS-NLMP 3.3.1): an SMB client cannot log in without it.
+
+(defun md4 (msg)
+  "MD4 of the byte vector MSG: a fresh 16-byte vector.  For NTLM only."
+  (let* ((m (%md-pad msg nil))
+         (h (list #x67452301 #xefcdab89 #x98badcfe #x10325476))
+         (x (make-array 16 :element-type '(unsigned-byte 32))))
+    (loop for off from 0 below (length m) by 64 do
+      (dotimes (i 16)
+        (let ((j (+ off (* 4 i))))
+          (setf (aref x i) (logior (aref m j) (%shl32 (aref m (+ j 1)) 8)
+                                   (%shl32 (aref m (+ j 2)) 16) (%shl32 (aref m (+ j 3)) 24)))))
+      (destructuring-bind (a b c d) h
+        ;; round 1: F(b,c,d) = bc | ~b d, shifts 3 7 11 19, words in order
+        (dotimes (i 16)
+          (let ((f (logior (logand b c) (logand (logxor b #xffffffff) d))))
+            (setf a (%rol32 (%add32 a f (aref x i)) (aref #(3 7 11 19) (mod i 4))))
+            (psetf a d b a c b d c)))
+        ;; round 2: G = bc | bd | cd, + #x5A827999, shifts 3 5 9 13, words 0 4 8 12 1 5 9 13 ...
+        (dotimes (i 16)
+          (let ((g (logior (logand b c) (logand b d) (logand c d)))
+                (k (+ (* 4 (mod i 4)) (floor i 4))))
+            (setf a (%rol32 (%add32 a g (aref x k) #x5A827999) (aref #(3 5 9 13) (mod i 4))))
+            (psetf a d b a c b d c)))
+        ;; round 3: H = b ^ c ^ d, + #x6ED9EBA1, shifts 3 9 11 15, words 0 8 4 12 2 10 6 14 ...
+        (dotimes (i 16)
+          (let ((hh (logxor b c d))
+                (k (aref #(0 8 4 12 2 10 6 14 1 9 5 13 3 11 7 15) i)))
+            (setf a (%rol32 (%add32 a hh (aref x k) #x6ED9EBA1) (aref #(3 9 11 15) (mod i 4))))
+            (psetf a d b a c b d c)))
+        (setf h (mapcar #'%add32 h (list a b c d)))))
+    (let ((out (make-u8v 16)))
+      (loop for w in h for i from 0 do
+        (dotimes (k 4) (setf (aref out (+ (* 4 i) k)) (ldb (byte 8 (* 8 k)) w))))
+      out)))
+
+(defun hmac-md5 (key msg)
+  "HMAC-MD5 (RFC 2104).  For NTLMv2 (MS-NLMP 3.3.2), whose keys are hashes of a password."
+  (hmac #'md5 64 key msg))
+
 ;;; --- RIPEMD-160 (Dobbertin, Bosselaers, Preneel 1996) ---------------------
 
 (defparameter +rmd-r+

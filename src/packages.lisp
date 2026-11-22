@@ -19,7 +19,7 @@
     (widening multiply / add-with-carry) that lowers the portable limb multiply.")
   (:export
    ;; hashing
-   #:sha1 #:sha1-init #:sha1-update #:sha1-final #:sha1-copy-state #:md5 #:ripemd160 #:hash160
+   #:sha1 #:sha1-init #:sha1-update #:sha1-final #:sha1-copy-state #:md5 #:md4 #:hmac-md5 #:ripemd160 #:hash160
    #:sha3-256 #:shake256 #:make-sha3-256-state #:make-shake256-state #:sha3-update #:sha3-final #:sha3-copy-state
    #:sha256 #:sha384 #:sha512
    #:sha256-into #:sha384-into #:sha512-into
@@ -39,7 +39,7 @@
    #:poly1305-mac #:poly1305-key-gen
    #:chacha20-poly1305-encrypt #:chacha20-poly1305-decrypt
    ;; AES (constant-time, bit-sliced S-box)
-   #:aes-key #:aes-key-p #:make-aes-key #:aes-key-wipe #:with-aes-key
+   #:aes-key #:aes-key-p #:make-aes-key #:aes-cmac #:aes-key-wipe #:with-aes-key
    #:aes-encrypt-block #:aes-decrypt-block
    #:aes-cbc-encrypt #:aes-cbc-decrypt-into #:aes-ctr-xor-into
    #:aes-stream #:make-aes-ctr-stream #:make-aes-cfb-stream #:aes-stream-xor #:aes-stream-wipe

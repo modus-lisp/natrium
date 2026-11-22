@@ -355,6 +355,40 @@ OUT at OUT-START.  Encryption and decryption are the same operation.  Returns OU
       (gossamer:own st reg ks)
       st)))
 
+;;; --- AES-CMAC (RFC 4493; NIST SP 800-38B) ----------------------------------
+;;; SMB 3.0's message signing (MS-SMB2 3.1.4.1).
+
+(defun %cmac-dbl (b)
+  "B (16 bytes) doubled in GF(2^128): shifted left one bit, #x87 folded in on a carry."
+  (let ((out (make-u8v 16)) (carry (ldb (byte 1 7) (aref b 0))))
+    (dotimes (i 16)
+      (setf (aref out i) (logand #xff (logior (ash (aref b i) 1)
+                                              (if (< i 15) (ldb (byte 1 7) (aref b (1+ i))) 0)))))
+    (when (= carry 1) (setf (aref out 15) (logxor (aref out 15) #x87)))
+    out))
+
+(defun aes-cmac (k msg)
+  "The 16-byte AES-CMAC of the byte vector MSG under the AES-KEY K (MAKE-AES-KEY)."
+  (let* ((zero (make-u8v 16)) (l (make-u8v 16)))
+    (aes-encrypt-block k zero l)
+    (let* ((k1 (%cmac-dbl l)) (k2 (%cmac-dbl k1))
+           (n (length msg))
+           (blocks (max 1 (ceiling n 16)))
+           (complete (and (plusp n) (zerop (mod n 16))))
+           (x (make-u8v 16)) (y (make-u8v 16)))
+      (dotimes (bi blocks)
+        (let ((last (= bi (1- blocks))) (off (* 16 bi)))
+          (dotimes (i 16)
+            (let* ((j (+ off i))
+                   (m (cond ((< j n) (aref msg j))
+                            ((= j n) #x80)            ; the padding a short last block gets
+                            (t 0))))
+              (setf (aref y i)
+                    (logxor (aref x i) m
+                            (if last (aref (if complete k1 k2) i) 0)))))
+          (aes-encrypt-block k y x)))
+      x)))
+
 (defun make-aes-ctr-stream (k iv)
   "A CTR stream under the AES-KEY K from the 16-byte initial counter IV (a 128-bit
    big-endian integer, incremented per block)."
