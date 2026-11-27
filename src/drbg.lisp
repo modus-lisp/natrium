@@ -6,9 +6,11 @@
 ;;;; process default uses HMAC-SHA512 (outlen 64), while the test suite also
 ;;;; instantiates a SHA-256 DRBG to check against a real NIST CAVP known-answer.
 ;;;;
-;;;; Not reentrant: the process-global instance behind RANDOM-BYTES must not be
-;;;; shared across threads without external locking.  Under modus each actor has
-;;;; its own heap, so one DRBG per actor is the natural (lock-free) shape.
+;;;; A DRBG instance is not reentrant.  The process-global one behind RANDOM-BYTES
+;;;; is therefore taken under *DRBG-LOCK* where threads share it (SBCL): 16 threads
+;;;; drawing at once got duplicate outputs (hundreds in 50 rounds) before the lock.
+;;;; Under modus each thread and actor has its own (below), so there is nothing to
+;;;; lock.
 
 (in-package #:natrium)
 
@@ -122,6 +124,13 @@
 #+modus
 (gossamer::%on-restore (lambda () (setf *default-drbg* nil)))
 
+(defvar *drbg-lock* #+(and sb-thread (not modus)) (sb-thread:make-mutex :name "natrium drbg")
+                    #-(and sb-thread (not modus)) nil)
+
+(defmacro with-drbg-lock (&body body)
+  #+(and sb-thread (not modus)) `(sb-thread:with-recursive-lock (*drbg-lock*) ,@body)
+  #-(and sb-thread (not modus)) `(progn ,@body))
+
 (defun ensure-default-drbg ()
   (or *default-drbg*
       (setf *default-drbg*
@@ -129,18 +138,19 @@
 
 (defun random-bytes (n)
   "N cryptographically-random bytes from the process-global CSPRNG (HMAC-SHA512
-   DRBG, seeded and periodically reseeded from *OS-ENTROPY*).  Not reentrant —
-   see the file header; per-thread/per-actor callers should use their own
-   DRBG-INSTANTIATE."
-  (let ((d (ensure-default-drbg)))
-    (when (> (drbg-reseed-counter d) *drbg-reseed-interval*)
-      (drbg-reseed d (os-entropy 32)))
-    (drbg-generate d n)))
+   DRBG, seeded and periodically reseeded from *OS-ENTROPY*).  Safe from any
+   thread: see the file header."
+  (with-drbg-lock
+    (let ((d (ensure-default-drbg)))
+      (when (> (drbg-reseed-counter d) *drbg-reseed-interval*)
+        (drbg-reseed d (os-entropy 32)))
+      (drbg-generate d n))))
 
 (defun random-bytes-into (out &key (start 0) (end (length out)))
   "Fill OUT[START,END) from the process-global CSPRNG -- the form for key material:
 generate straight into a fixed buffer, so the secret never exists on the heap."
-  (let ((d (ensure-default-drbg)))
-    (when (> (drbg-reseed-counter d) *drbg-reseed-interval*)
-      (drbg-reseed d (os-entropy 32)))
-    (drbg-generate-into d out nil :start start :end end)))
+  (with-drbg-lock
+    (let ((d (ensure-default-drbg)))
+      (when (> (drbg-reseed-counter d) *drbg-reseed-interval*)
+        (drbg-reseed d (os-entropy 32)))
+      (drbg-generate-into d out nil :start start :end end))))

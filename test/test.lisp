@@ -7,6 +7,11 @@
 
 (in-package #:natrium.test)
 
+(defun %random-after-semaphore (go)
+  "A thread body for the concurrent RANDOM-BYTES check: wait for GO, draw 16 bytes."
+  (sb-thread:wait-on-semaphore go)
+  (natrium:random-bytes 16))
+
 (defun hex->bytes (hex)
   (let* ((hex (remove #\Space hex))
          (n (/ (length hex) 2))
@@ -249,6 +254,25 @@
       (check "hmac-drbg sha512 vector"
              (n:drbg-generate d 64)
              "5a947e2ec811344b506f321e3f1fbde3fde96845301a7c1793e72b2071e1d984846eda8ee0e97301da2e6d07c4937b7a50c729a1ad16e594ab3dd96561709270"))
+
+    ;; RANDOM-BYTES from several threads at once: every output distinct.  The
+    ;; process-global DRBG had no lock, and 8 threads drawing together got dozens of
+    ;; duplicate 16-byte outputs in 50 rounds on SBCL.  (modus: one DRBG per thread.)
+    #+sb-thread
+    (let ((all nil))
+      (dotimes (round 50)
+        (let* ((go (sb-thread:make-semaphore))
+               (ths (loop repeat 8
+                          collect (sb-thread:make-thread #'%random-after-semaphore
+                                                         :arguments (list go)))))
+          (sb-thread:signal-semaphore go 8)
+          (setf all (append (mapcar #'sb-thread:join-thread ths) all))))
+      (incf *count*)
+      (let ((distinct (length (remove-duplicates all :test #'equalp))))
+        (if (= distinct 400)
+            (format t "  ok    random-bytes from 8 threads at once: all 400 distinct~%")
+            (progn (incf *fails*)
+                   (format t "  FAIL  random-bytes from 8 threads at once: ~d of 400 distinct~%" distinct)))))
 
     ;; ---- original ChaCha20 (64-bit counter/nonce; used by SSH) ----
     (check "chacha20-original zero vector"
