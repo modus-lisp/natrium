@@ -48,7 +48,8 @@
    ;; Ed25519 signatures
    #:ed25519-public-key #:ed25519-sign #:ed25519-verify #:ed25519-keypair
    ;; small helpers
-   #:ascii->bytes #:make-u8v #:u8cat #:bytes= #:u8v))
+   #:ascii->bytes #:make-u8v #:u8cat #:bytes= #:u8v
+   #:base64-encode #:base64-decode))
 
 (defpackage #:natrium.noise
   (:use #:cl)
